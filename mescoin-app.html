@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MesCoin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#0b1020;color:#fff}
+header{padding:18px 16px;background:#111a33;display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:24px;font-weight:800;color:#55d6ff}
+.status{font-size:12px;padding:7px 10px;border-radius:20px;background:#333;color:#ddd}
+.status.online{background:#123d2a;color:#62e6a5}
+main{padding:16px;max-width:650px;margin:auto}
+.card{background:#121b35;border:1px solid #26345b;border-radius:16px;padding:16px;margin-bottom:14px}
+h2{margin:0 0 12px}
+.price{font-size:34px;font-weight:800;margin:8px 0}
+.muted{color:#9aa7c7;font-size:13px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+input{width:100%;padding:13px;border-radius:10px;border:1px solid #344469;background:#0c1428;color:#fff;font-size:16px;margin:6px 0 10px}
+button{width:100%;padding:13px;border:0;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer}
+.buy{background:#1fc77a;color:#04130c}
+.sell{background:#ff5f6d;color:#fff}
+.connect{background:#3c82ff;color:#fff}
+nav{position:sticky;bottom:0;background:#10182f;padding:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+nav button{background:#1a2748;color:#fff}
+#message{margin-top:10px;padding:10px;border-radius:10px;display:none}
+.success{background:#123d2a;color:#62e6a5}
+.error{background:#4a1720;color:#ff9aa4}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">MesCoin</div>
+  <div id="status" class="status">Checking server...</div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="muted">MESCOIN MARKET</div>
+    <div class="price">MCN 100.00 KES</div>
+    <div class="muted">Demo market price — connect your real trading logic later.</div>
+  </section>
+
+  <section class="card">
+    <h2>Trade MesCoin</h2>
+    <label class="muted">Amount (MCN)</label>
+    <input id="amount" type="number" min="1" placeholder="Enter amount">
+
+    <div class="grid">
+      <button class="buy" onclick="placeOrder('buy')">BUY</button>
+      <button class="sell" onclick="placeOrder('sell')">SELL</button>
+    </div>
+
+    <div id="message"></div>
+  </section>
+
+  <section class="card">
+    <h2>Server</h2>
+    <div class="muted">API address</div>
+    <div style="margin:8px 0 14px;word-break:break-all">http://127.0.0.1:3000</div>
+    <button class="connect" onclick="checkServer()">Check connection</button>
+  </section>
+
+  <section class="card">
+    <h2>Portfolio</h2>
+    <div class="grid">
+      <div><div class="muted">MesCoin</div><strong id="balance">0 MCN</strong></div>
+      <div><div class="muted">KES value</div><strong id="value">0 KES</strong></div>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button onclick="scrollToTop()">Home</button>
+  <button onclick="document.querySelector('.card:nth-of-type(2)').scrollIntoView()">Trade</button>
+  <button onclick="document.querySelector('.card:nth-of-type(4)').scrollIntoView()">Portfolio</button>
+</nav>
+
+<script>
+const API = "http://127.0.0.1:3000";
+
+function showMessage(text, ok=true){
+  const box=document.getElementById("message");
+  box.textContent=text;
+  box.className=ok ? "success" : "error";
+  box.style.display="block";
+}
+
+async function checkServer(){
+  const status=document.getElementById("status");
+  status.textContent="Checking...";
+  status.className="status";
+  try{
+    const r=await fetch(API+"/");
+    const data=await r.json();
+    if(data.status==="online"){
+      status.textContent="Server online";
+      status.className="status online";
+      showMessage("Connected to MesCoin server.",true);
+    }else throw new Error();
+  }catch(e){
+    status.textContent="Server offline";
+    status.className="status";
+    showMessage("Cannot connect. Keep node index.js running in Termux.",false);
+  }
+}
+
+async function placeOrder(type){
+  const amount=Number(document.getElementById("amount").value);
+  if(!amount || amount<=0){
+    showMessage("Enter a valid MesCoin amount.",false);
+    return;
+  }
+
+  try{
+    const r=await fetch(API+"/"+type,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        amount:amount,
+        price:100,
+        currency:"KES",
+        time:new Date().toISOString()
+      })
+    });
+    const data=await r.json();
+    if(data.success){
+      showMessage((type==="buy"?"Buy":"Sell")+" order sent to server.",true);
+      document.getElementById("amount").value="";
+    }else{
+      showMessage("Server rejected the order.",false);
+    }
+  }catch(e){
+    showMessage("Connection failed. Make sure the server is running.",false);
+  }
+}
+
+function scrollToTop(){window.scrollTo({top:0,behavior:"smooth"})}
+checkServer();
+</script>
+</body>
+</html>
