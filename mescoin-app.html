@@ -16,133 +16,77 @@ body{
 }
 
 header{
-  padding:18px 16px;
+  padding:18px;
   background:#111a33;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+  text-align:center;
 }
 
-.logo{
-  font-size:24px;
-  font-weight:800;
-  color:#55d6ff;
+h1{
+  margin:0;
+  color:#4da6ff;
 }
 
-.status{
-  font-size:12px;
-  padding:7px 10px;
-  border-radius:20px;
-  background:#4a1720;
-  color:#ff9aa4;
-}
-
-.status.online{
-  background:#123d2a;
-  color:#62e6a5;
-}
-
-main{
-  padding:16px;
-  max-width:650px;
+.container{
+  padding:20px;
+  max-width:600px;
   margin:auto;
 }
 
 .card{
-  background:#121b35;
-  border:1px solid #26345b;
-  border-radius:16px;
-  padding:16px;
-  margin-bottom:14px;
+  background:#151e38;
+  padding:20px;
+  margin-bottom:18px;
+  border-radius:14px;
 }
 
-h2{
-  margin:0 0 12px;
-}
-
-.price{
-  font-size:30px;
-  font-weight:800;
-  margin:8px 0;
-}
-
-.muted{
-  color:#9aa7c7;
-  font-size:13px;
-}
-
-.grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
+input,button{
+  width:100%;
+  padding:14px;
+  margin-top:10px;
+  border-radius:8px;
+  border:0;
+  font-size:16px;
 }
 
 input{
-  width:100%;
-  padding:13px;
-  border-radius:10px;
-  border:1px solid #344469;
-  background:#0c1428;
+  background:#263250;
   color:white;
-  font-size:16px;
-  margin:6px 0 10px;
 }
 
 button{
-  width:100%;
-  padding:13px;
-  border:0;
-  border-radius:10px;
-  font-size:16px;
-  font-weight:700;
-  cursor:pointer;
-}
-
-.buy{
-  background:#1fc77a;
-  color:#04130c;
-}
-
-.sell{
-  background:#ff5f6d;
+  background:#1677ff;
   color:white;
+  font-weight:bold;
 }
 
-.connect{
-  background:#3c82ff;
-  color:white;
+button:active{
+  background:#0d5dcc;
 }
 
-#message{
-  margin-top:10px;
+.balance{
+  font-size:28px;
+  color:#4da6ff;
+  font-weight:bold;
+}
+
+.status{
+  text-align:center;
   padding:10px;
-  border-radius:10px;
-  display:none;
+  margin-bottom:15px;
+  border-radius:8px;
+  background:#252d45;
 }
 
 .success{
-  background:#123d2a;
-  color:#62e6a5;
+  color:#4dff88;
 }
 
 .error{
-  background:#4a1720;
-  color:#ff9aa4;
+  color:#ff6666;
 }
 
-nav{
-  position:sticky;
-  bottom:0;
-  background:#10182f;
-  padding:10px;
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:8px;
-}
-
-nav button{
-  background:#1a2748;
-  color:white;
+small{
+  color:#aaa;
 }
 </style>
 </head>
@@ -150,184 +94,174 @@ nav button{
 <body>
 
 <header>
-  <div class="logo">MesCoin</div>
-  <div id="status" class="status">Checking server...</div>
+<h1>MesCoin</h1>
 </header>
 
-<main>
+<div class="container">
 
-<section class="card">
-  <div class="muted">MESCOIN MARKET</div>
-  <div class="price">MCN 100.00 Dollars</div>
-  <div class="muted">
-    MesCoin trading platform
-  </div>
-</section>
+<div id="status" class="status">
+Connecting to MesCoin server...
+</div>
 
-<section class="card">
-  <h2>Trade MesCoin</h2>
+<div class="card">
+<h2>My Balance</h2>
+<div class="balance" id="balance">0 MES</div>
+</div>
 
-  <label class="muted">Amount (MCN)</label>
+<div class="card">
+<h2>Buy MesCoin</h2>
 
-  <input
-    id="amount"
-    type="number"
-    min="1"
-    placeholder="Enter amount"
-  >
+<input
+id="buyAmount"
+type="number"
+placeholder="Enter amount of MES">
 
-  <div class="grid">
-    <button class="buy" onclick="placeOrder('buy')">
-      BUY
-    </button>
+<button onclick="buyCoin()">
+Buy MesCoin
+</button>
+</div>
 
-    <button class="sell" onclick="placeOrder('sell')">
-      SELL
-    </button>
-  </div>
+<div class="card">
+<h2>Sell MesCoin</h2>
 
-  <div id="message"></div>
-</section>
+<input
+id="sellAmount"
+type="number"
+placeholder="Enter amount of MES">
 
-<section class="card">
-  <h2>Server</h2>
+<button onclick="sellCoin()">
+Sell MesCoin
+</button>
+</div>
 
-  <div class="muted">Connected API</div>
+<div class="card">
+<h2>Send MesCoin</h2>
 
-  <div style="margin:8px 0 14px;word-break:break-all">
-    https://mescoin-server.onrender.com
-  </div>
+<input
+id="recipient"
+type="text"
+placeholder="Recipient">
 
-  <button class="connect" onclick="checkServer()">
-    Check Server Connection
-  </button>
-</section>
+<input
+id="sendAmount"
+type="number"
+placeholder="Amount of MES">
 
-<section class="card">
-  <h2>Portfolio</h2>
+<button onclick="sendCoin()">
+Send MesCoin
+</button>
+</div>
 
-  <div class="grid">
+<div class="card">
+<h2>Server</h2>
+<small>
+https://mescoin-1.onrender.com
+</small>
+</div>
 
-    <div>
-      <div class="muted">MesCoin</div>
-      <strong id="balance">0 MCN</strong>
-    </div>
-
-    <div>
-      <div class="muted">KES value</div>
-      <strong id="value">0 KES</strong>
-    </div>
-
-  </div>
-</section>
-
-</main>
-
-<nav>
-  <button onclick="window.scrollTo({top:0,behavior:'smooth'})">
-    Home
-  </button>
-
-  <button onclick="document.getElementById('amount').scrollIntoView({behavior:'smooth'})">
-    Trade
-  </button>
-
-  <button onclick="document.getElementById('balance').scrollIntoView({behavior:'smooth'})">
-    Portfolio
-  </button>
-</nav>
+</div>
 
 <script>
 
-/* YOUR ONLINE RENDER SERVER */
-const API = "https://mescoin-server.onrender.com";
+const SERVER =
+"https://mescoin-1.onrender.com";
 
+/* -------------------------
+   SERVER CONNECTION
+------------------------- */
 
-function showMessage(text, ok=true){
-
-  const box = document.getElementById("message");
-
-  box.textContent = text;
-
-  box.className = ok ? "success" : "error";
-
-  box.style.display = "block";
-}
-
-
-/* CHECK RENDER SERVER */
 async function checkServer(){
-
-  const status = document.getElementById("status");
-
-  status.textContent = "Checking...";
-  status.className = "status";
 
   try{
 
-    const response = await fetch(API + "/");
+    const response =
+      await fetch(SERVER + "/", {
+        method:"GET"
+      });
 
-    if(!response.ok){
-      throw new Error("Server error");
-    }
+    if(response.ok){
 
-    const data = await response.json();
+      document.getElementById("status").innerHTML =
+        "● Server connected";
 
-    if(data.status === "online"){
+      document.getElementById("status").className =
+        "status success";
 
-      status.textContent = "Server online";
-      status.className = "status online";
-
-      showMessage(
-        "Connected to MesCoin server.",
-        true
-      );
+      loadBalance();
 
     }else{
 
-      throw new Error("Invalid server response");
+      throw new Error("Server error");
 
     }
 
   }catch(error){
 
-    status.textContent = "Server offline";
-    status.className = "status";
+    document.getElementById("status").innerHTML =
+      "● Server offline";
 
-    showMessage(
-      "Cannot connect to the MesCoin server.",
-      false
-    );
+    document.getElementById("status").className =
+      "status error";
+
   }
+
 }
 
 
-/* BUY OR SELL */
-async function placeOrder(type){
+/* -------------------------
+   LOAD BALANCE
+------------------------- */
+
+async function loadBalance(){
+
+  try{
+
+    const response =
+      await fetch(SERVER + "/balance");
+
+    if(!response.ok) return;
+
+    const data =
+      await response.json();
+
+    if(data.balance !== undefined){
+
+      document.getElementById("balance").innerText =
+        data.balance + " MES";
+
+    }
+
+  }catch(error){
+
+    console.log(error);
+
+  }
+
+}
+
+
+/* -------------------------
+   BUY
+------------------------- */
+
+async function buyCoin(){
 
   const amount =
-    Number(document.getElementById("amount").value);
+    document.getElementById("buyAmount").value;
 
   if(!amount || amount <= 0){
 
-    showMessage(
-      "Enter a valid MesCoin amount.",
-      false
-    );
+    alert("Enter a valid amount");
 
     return;
+
   }
 
   try{
 
-    showMessage(
-      "Sending " + type + " order...",
-      true
-    );
+    const response =
+      await fetch(SERVER + "/buy",{
 
-    const response = await fetch(
-      API + "/" + type,
-      {
         method:"POST",
 
         headers:{
@@ -335,55 +269,162 @@ async function placeOrder(type){
         },
 
         body:JSON.stringify({
-
-          amount:amount,
-
-          price:100,
-
-          currency:"Dollars",
-
-          time:new Date().toISOString()
-
+          amount:Number(amount)
         })
-      }
-    );
 
-    const data = await response.json();
+      });
 
-    if(data.success){
+    const data =
+      await response.json();
 
-      showMessage(
-        type.toUpperCase() +
-        " order sent successfully.",
-        true
-      );
+    if(response.ok){
 
-      document.getElementById("amount").value = "";
+      alert("Buy successful");
+
+      loadBalance();
 
     }else{
 
-      showMessage(
-        data.message ||
-        "Server rejected the order.",
-        false
-      );
+      alert(data.error || "Buy failed");
+
     }
 
   }catch(error){
 
-    showMessage(
-      "Connection failed. Check that the Render server is running.",
-      false
-    );
+    alert("Cannot connect to server");
+
   }
+
 }
 
 
-/* CHECK SERVER WHEN APP OPENS */
+/* -------------------------
+   SELL
+------------------------- */
+
+async function sellCoin(){
+
+  const amount =
+    document.getElementById("sellAmount").value;
+
+  if(!amount || amount <= 0){
+
+    alert("Enter a valid amount");
+
+    return;
+
+  }
+
+  try{
+
+    const response =
+      await fetch(SERVER + "/sell",{
+
+        method:"POST",
+
+        headers:{
+          "Content-Type":"application/json"
+        },
+
+        body:JSON.stringify({
+          amount:Number(amount)
+        })
+
+      });
+
+    const data =
+      await response.json();
+
+    if(response.ok){
+
+      alert("Sell successful");
+
+      loadBalance();
+
+    }else{
+
+      alert(data.error || "Sell failed");
+
+    }
+
+  }catch(error){
+
+    alert("Cannot connect to server");
+
+  }
+
+}
+
+
+/* -------------------------
+   SEND
+------------------------- */
+
+async function sendCoin(){
+
+  const recipient =
+    document.getElementById("recipient").value;
+
+  const amount =
+    document.getElementById("sendAmount").value;
+
+  if(!recipient || !amount || amount <= 0){
+
+    alert("Enter recipient and amount");
+
+    return;
+
+  }
+
+  try{
+
+    const response =
+      await fetch(SERVER + "/send",{
+
+        method:"POST",
+
+        headers:{
+          "Content-Type":"application/json"
+        },
+
+        body:JSON.stringify({
+          recipient:recipient,
+          amount:Number(amount)
+        })
+
+      });
+
+    const data =
+      await response.json();
+
+    if(response.ok){
+
+      alert("MesCoin sent successfully");
+
+      loadBalance();
+
+    }else{
+
+      alert(data.error || "Transaction failed");
+
+    }
+
+  }catch(error){
+
+    alert("Cannot connect to server");
+
+  }
+
+}
+
+
+/* -------------------------
+   START
+------------------------- */
+
 checkServer();
 
 </script>
 
 </body>
   </html>
-                                    
