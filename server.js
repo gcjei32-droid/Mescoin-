@@ -4,115 +4,133 @@ const path = require("path");
 
 const app = express();
 
+const PORT = process.env.PORT || 3000;
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Serve the MesCoin app
+// Serve the frontend if the public folder exists
 app.use(express.static(path.join(__dirname, "public")));
 
-// Demo wallet data
-let wallet = {
-  mes: 100,
-  cash: 1000
-};
+// Simple MesCoin data
+let mescoinBalance = 100;
+let cashBalance = 1000;
+let mescoinPrice = 1;
 
-// MesCoin price
-let mesPrice = 1;
+// ===============================
+// HOME / SERVER STATUS
+// ===============================
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    status: "online",
+    message: "MesCoin server is running!",
+    price: mescoinPrice,
+    balance: mescoinBalance,
+    cash: cashBalance
+  });
+});
 
+// ===============================
 // SERVER STATUS
+// ===============================
 app.get("/api/status", (req, res) => {
   res.json({
     success: true,
-    message: "MesCoin server is running",
-    status: "online"
+    status: "online",
+    message: "MesCoin server is connected",
+    price: mescoinPrice
   });
 });
 
+// ===============================
 // BALANCE
+// ===============================
 app.get("/api/balance", (req, res) => {
   res.json({
     success: true,
-    mes: wallet.mes,
-    cash: wallet.cash,
-    price: mesPrice,
-    currency: "MES"
+    mescoin: mescoinBalance,
+    cash: cashBalance,
+    price: mescoinPrice
   });
 });
 
-// BUY MES
+// ===============================
+// BUY MESCOIN
+// ===============================
 app.post("/api/buy", (req, res) => {
   const amount = Number(req.body.amount);
 
-  if (!Number.isFinite(amount) || amount <= 0) {
+  if (!amount || amount <= 0) {
     return res.status(400).json({
       success: false,
       message: "Enter a valid amount"
     });
   }
 
-  const cost = amount * mesPrice;
+  const totalCost = amount * mescoinPrice;
 
-  if (cost > wallet.cash) {
+  if (totalCost > cashBalance) {
     return res.status(400).json({
       success: false,
       message: "Insufficient cash balance"
     });
   }
 
-  wallet.cash -= cost;
-  wallet.mes += amount;
+  mescoinBalance += amount;
+  cashBalance -= totalCost;
 
   res.json({
     success: true,
-    message: "MES bought successfully",
-    bought: amount,
-    price: mesPrice,
-    mes: wallet.mes,
-    cash: wallet.cash
+    message: "MesCoin purchased successfully",
+    amount: amount,
+    price: mescoinPrice,
+    total: totalCost,
+    mescoin: mescoinBalance,
+    cash: cashBalance
   });
 });
 
-// SELL MES
+// ===============================
+// SELL MESCOIN
+// ===============================
 app.post("/api/sell", (req, res) => {
   const amount = Number(req.body.amount);
 
-  if (!Number.isFinite(amount) || amount <= 0) {
+  if (!amount || amount <= 0) {
     return res.status(400).json({
       success: false,
       message: "Enter a valid amount"
     });
   }
 
-  if (amount > wallet.mes) {
+  if (amount > mescoinBalance) {
     return res.status(400).json({
       success: false,
-      message: "Insufficient MES balance"
+      message: "Insufficient MesCoin balance"
     });
   }
 
-  const received = amount * mesPrice;
+  const totalValue = amount * mescoinPrice;
 
-  wallet.mes -= amount;
-  wallet.cash += received;
+  mescoinBalance -= amount;
+  cashBalance += totalValue;
 
   res.json({
     success: true,
-    message: "MES sold successfully",
-    sold: amount,
-    price: mesPrice,
-    mes: wallet.mes,
-    cash: wallet.cash
+    message: "MesCoin sold successfully",
+    amount: amount,
+    price: mescoinPrice,
+    total: totalValue,
+    mescoin: mescoinBalance,
+    cash: cashBalance
   });
 });
 
-// Keep the web app working
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-// Render supplies its own PORT
-const PORT = process.env.PORT || 3000;
-
+// ===============================
+// START SERVER
+// ===============================
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`MesCoin server running on port ${PORT}`);
 });
