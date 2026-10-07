@@ -1,9 +1,8 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport"
-      content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>MesCoin</title>
 
@@ -21,177 +20,169 @@ body {
 
 header {
     background: #111a33;
-    padding: 18px;
     text-align: center;
+    padding: 25px 15px;
     border-bottom: 1px solid #26345b;
 }
 
 header h1 {
-    margin: 0;
+    margin: 0 0 12px;
     color: #55d6ff;
-    font-size: 28px;
+    font-size: 30px;
 }
 
-#connectionStatus {
-    margin-top: 8px;
+.status {
     display: inline-block;
-    padding: 6px 12px;
+    padding: 9px 18px;
     border-radius: 20px;
-    font-size: 13px;
+    font-size: 14px;
+}
+
+.status.checking {
     background: #4a1720;
     color: #ff9aa4;
 }
 
-#connectionStatus.online {
+.status.online {
     background: #123d2a;
     color: #62e6a5;
 }
 
+.status.offline {
+    background: #4a1720;
+    color: #ff9aa4;
+}
+
 .container {
+    width: 100%;
     max-width: 650px;
     margin: auto;
-    padding: 15px;
+    padding: 22px;
 }
 
 .card {
-    background: #151e38;
+    background: #121b35;
     border: 1px solid #26345b;
-    border-radius: 16px;
-    padding: 18px;
-    margin-bottom: 15px;
+    border-radius: 18px;
+    padding: 26px;
+    margin-bottom: 22px;
 }
 
-.card h2 {
-    margin-top: 0;
+h2 {
     color: #55d6ff;
+    margin-top: 0;
 }
 
-input,
-select {
+input {
     width: 100%;
-    padding: 13px;
-    margin: 7px 0;
-    border-radius: 10px;
-    border: 1px solid #34446e;
-    background: #0c1429;
+    padding: 17px;
+    margin: 9px 0;
+    border-radius: 14px;
+    border: 1px solid #30416d;
+    background: #080f25;
     color: white;
-    font-size: 15px;
+    font-size: 16px;
+    outline: none;
+}
+
+input:focus {
+    border-color: #2196ff;
 }
 
 button {
     width: 100%;
-    padding: 13px;
-    margin-top: 8px;
+    padding: 16px;
+    margin-top: 12px;
     border: none;
-    border-radius: 10px;
-    background: #1677ff;
+    border-radius: 13px;
     color: white;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: bold;
     cursor: pointer;
 }
 
-button:hover {
-    opacity: 0.9;
-}
-
-button.green {
-    background: #159447;
-}
-
-button.red {
-    background: #d33b4b;
-}
-
-button.gray {
-    background: #39445f;
-}
-
-.hidden {
-    display: none;
-}
-
-.balance {
-    font-size: 27px;
-    font-weight: bold;
-    margin: 8px 0;
-}
-
-.label {
-    color: #9da9c8;
-    font-size: 14px;
-}
-
-.message {
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 12px;
-    display: none;
-}
-
-.message.success {
-    display: block;
-    background: #123d2a;
-    color: #62e6a5;
-}
-
-.message.error {
-    display: block;
-    background: #4a1720;
-    color: #ff9aa4;
-}
-
-.nav {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 7px;
-    margin-bottom: 15px;
-}
-
-.nav button {
-    margin: 0;
-    background: #202b49;
-    font-size: 13px;
-}
-
-.nav button.active {
+.blue {
     background: #1677ff;
 }
 
-.order {
-    background: #0d162d;
-    border: 1px solid #29385f;
-    border-radius: 12px;
-    padding: 13px;
-    margin-top: 10px;
+.green {
+    background: #159447;
 }
 
-.order.buy {
-    border-left: 4px solid #20c875;
+.red {
+    background: #d83248;
 }
 
-.order.sell {
-    border-left: 4px solid #ff5364;
+.gray {
+    background: #394463;
 }
 
-.order-title {
+button:disabled {
+    opacity: .5;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.message {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 10px;
+    background: #18233f;
+    color: #b9c8e8;
+    text-align: center;
+}
+
+.stat {
+    background: #0c142b;
+    border: 1px solid #26345b;
+    padding: 18px;
+    border-radius: 14px;
+    margin: 10px 0;
+}
+
+.stat-title {
+    color: #91a0c4;
+    font-size: 14px;
+}
+
+.stat-value {
+    font-size: 25px;
     font-weight: bold;
-    margin-bottom: 8px;
-}
-
-.small {
-    font-size: 13px;
-    color: #aab5d0;
-    line-height: 1.6;
+    margin-top: 7px;
 }
 
 .price {
     color: #55d6ff;
-    font-weight: bold;
 }
 
-.logout {
-    background: #39445f;
+.row {
+    display: flex;
+    gap: 10px;
+}
+
+.row button {
+    flex: 1;
+}
+
+.order {
+    background: #0c142b;
+    border: 1px solid #26345b;
+    border-radius: 12px;
+    padding: 15px;
+    margin-top: 10px;
+}
+
+.small {
+    color: #91a0c4;
+    font-size: 13px;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #26345b;
+    margin: 22px 0;
 }
 </style>
 </head>
@@ -199,370 +190,295 @@ button.gray {
 <body>
 
 <header>
-
     <h1>MesCoin</h1>
 
-    <div id="connectionStatus">
+    <div id="serverStatus" class="status checking">
         Checking server...
     </div>
-
 </header>
-
 
 <div class="container">
 
-<!-- ================================================= -->
-<!-- MESSAGE -->
-<!-- ================================================= -->
+    <!-- AUTH PAGE -->
+    <div id="authPage">
 
-<div id="message" class="message"></div>
+        <div class="card">
 
+            <h2>Login</h2>
 
-<!-- ================================================= -->
-<!-- LOGIN / REGISTER -->
-<!-- ================================================= -->
+            <input
+                id="loginEmail"
+                type="email"
+                placeholder="Email"
+            >
 
-<div id="authPage">
+            <input
+                id="loginPassword"
+                type="password"
+                placeholder="Password"
+            >
 
-    <div class="card">
+            <button
+                class="blue"
+                onclick="login()"
+            >
+                Login
+            </button>
 
-        <h2>Login</h2>
-
-        <input
-            type="email"
-            id="loginEmail"
-            placeholder="Email">
-
-        <input
-            type="password"
-            id="loginPassword"
-            placeholder="Password">
-
-        <button onclick="login()">
-            Login
-        </button>
-
-    </div>
-
-
-    <div class="card">
-
-        <h2>Create Account</h2>
-
-        <input
-            type="text"
-            id="registerUsername"
-            placeholder="Username">
-
-        <input
-            type="email"
-            id="registerEmail"
-            placeholder="Email">
-
-        <input
-            type="password"
-            id="registerPassword"
-            placeholder="Password">
-
-        <button
-            class="green"
-            onclick="register()">
-
-            Create Account
-
-        </button>
-
-    </div>
-
-</div>
-
-
-<!-- ================================================= -->
-<!-- APP -->
-<!-- ================================================= -->
-
-<div id="appPage" class="hidden">
-
-    <div class="nav">
-
-        <button
-            id="portfolioNav"
-            class="active"
-            onclick="showPage('portfolio')">
-
-            Portfolio
-
-        </button>
-
-        <button
-            id="tradeNav"
-            onclick="showPage('trade')">
-
-            Trade
-
-        </button>
-
-        <button
-            id="marketNav"
-            onclick="showPage('market')">
-
-            Marketplace
-
-        </button>
-
-    </div>
-
-
-<!-- ================================================= -->
-<!-- PORTFOLIO -->
-<!-- ================================================= -->
-
-<div id="portfolioPage">
-
-    <div class="card">
-
-        <h2>Portfolio</h2>
-
-        <div class="label">
-            MesCoin Balance
-        </div>
-
-        <div
-            id="portfolioMescoin"
-            class="balance">
-
-            0 MES
+            <div id="loginMessage" class="message hidden"></div>
 
         </div>
 
 
-        <div class="label">
-            Cash Balance
-        </div>
+        <div class="card">
 
-        <div
-            id="portfolioCash"
-            class="balance">
+            <h2>Create Account</h2>
 
-            $0.00
+            <input
+                id="registerUsername"
+                type="text"
+                placeholder="Username"
+            >
 
-        </div>
+            <input
+                id="registerEmail"
+                type="email"
+                placeholder="Email"
+            >
 
+            <input
+                id="registerPassword"
+                type="password"
+                placeholder="Password"
+            >
 
-        <div class="label">
-            MesCoin Price
-        </div>
+            <button
+                class="green"
+                onclick="registerAccount()"
+            >
+                Create Account
+            </button>
 
-        <div
-            id="portfolioPrice"
-            class="balance">
-
-            $0.00
-
-        </div>
-
-
-        <div class="label">
-            MesCoin Value
-        </div>
-
-        <div
-            id="portfolioMesValue"
-            class="balance">
-
-            $0.00
-
-        </div>
-
-
-        <div class="label">
-            Total Portfolio Value
-        </div>
-
-        <div
-            id="portfolioTotal"
-            class="balance">
-
-            $0.00
+            <div id="registerMessage" class="message hidden"></div>
 
         </div>
 
     </div>
 
 
-    <div class="card">
+    <!-- APP PAGE -->
+    <div id="appPage" class="hidden">
 
-        <h2>Account</h2>
+        <div class="card">
 
-        <div class="small">
-            Username:
-            <span id="usernameDisplay"></span>
-        </div>
+            <h2 id="welcome">
+                Welcome
+            </h2>
 
-        <div class="small">
-            Email:
-            <span id="emailDisplay"></span>
-        </div>
-
-        <button
-            class="logout"
-            onclick="logout()">
-
-            Logout
-
-        </button>
-
-    </div>
-
-</div>
-
-
-<!-- ================================================= -->
-<!-- TRADE -->
-<!-- ================================================= -->
-
-<div id="tradePage" class="hidden">
-
-    <div class="card">
-
-        <h2>MesCoin Market</h2>
-
-        <div class="label">
-            Current MesCoin Price
-        </div>
-
-        <div
-            id="tradePrice"
-            class="balance price">
-
-            $1.00
+            <button
+                class="gray"
+                onclick="logout()"
+            >
+                Logout
+            </button>
 
         </div>
 
-        <div class="small">
-            Price is supplied by the MesCoin server.
+
+        <!-- PORTFOLIO -->
+
+        <div class="card">
+
+            <h2>Portfolio</h2>
+
+            <div class="stat">
+                <div class="stat-title">
+                    MesCoin Balance
+                </div>
+
+                <div
+                    id="mesBalance"
+                    class="stat-value"
+                >
+                    0 MES
+                </div>
+            </div>
+
+
+            <div class="stat">
+
+                <div class="stat-title">
+                    Cash Balance
+                </div>
+
+                <div
+                    id="cashBalance"
+                    class="stat-value"
+                >
+                    0
+                </div>
+
+            </div>
+
+
+            <div class="stat">
+
+                <div class="stat-title">
+                    MesCoin Price
+                </div>
+
+                <div
+                    id="coinPrice"
+                    class="stat-value price"
+                >
+                    0
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- TRADING -->
+
+        <div class="card">
+
+            <h2>Trade MesCoin</h2>
+
+            <input
+                id="tradeAmount"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Amount of MES"
+            >
+
+            <div class="row">
+
+                <button
+                    class="green"
+                    onclick="buyMesCoin()"
+                >
+                    Buy
+                </button>
+
+                <button
+                    class="red"
+                    onclick="sellMesCoin()"
+                >
+                    Sell
+                </button>
+
+            </div>
+
+            <div
+                id="tradeMessage"
+                class="message hidden"
+            ></div>
+
+        </div>
+
+
+        <!-- MARKET -->
+
+        <div class="card">
+
+            <h2>Market</h2>
+
+            <div class="stat">
+
+                <div class="stat-title">
+                    Current MES Price
+                </div>
+
+                <div
+                    id="marketPrice"
+                    class="stat-value price"
+                >
+                    Loading...
+                </div>
+
+            </div>
+
+            <button
+                class="blue"
+                onclick="loadMarket()"
+            >
+                Refresh Market
+            </button>
+
+        </div>
+
+
+        <!-- ORDERS -->
+
+        <div class="card">
+
+            <h2>Marketplace</h2>
+
+            <input
+                id="orderAmount"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="MES amount"
+            >
+
+            <input
+                id="orderPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Price per MES"
+            >
+
+            <div class="row">
+
+                <button
+                    class="green"
+                    onclick="createOrder('buy')"
+                >
+                    Buy Order
+                </button>
+
+                <button
+                    class="red"
+                    onclick="createOrder('sell')"
+                >
+                    Sell Order
+                </button>
+
+            </div>
+
+            <div
+                id="orderMessage"
+                class="message hidden"
+            ></div>
+
+            <hr>
+
+            <h2>Orders</h2>
+
+            <div id="orders">
+                Loading orders...
+            </div>
+
+        </div>
+
+
+        <!-- TRADING HISTORY -->
+
+        <div class="card">
+
+            <h2>Trade History</h2>
+
+            <div id="trades">
+                Loading...
+            </div>
+
         </div>
 
     </div>
-
-
-    <div class="card">
-
-        <h2>Buy MesCoin</h2>
-
-        <input
-            type="number"
-            id="buyAmount"
-            placeholder="Amount of MES"
-            min="0"
-            step="0.01">
-
-        <button
-            class="green"
-            onclick="buyMescoin()">
-
-            Buy MesCoin
-
-        </button>
-
-    </div>
-
-
-    <div class="card">
-
-        <h2>Sell MesCoin</h2>
-
-        <input
-            type="number"
-            id="sellAmount"
-            placeholder="Amount of MES"
-            min="0"
-            step="0.01">
-
-        <button
-            class="red"
-            onclick="sellMescoin()">
-
-            Sell MesCoin
-
-        </button>
-
-    </div>
-
-</div>
-
-
-<!-- ================================================= -->
-<!-- MARKETPLACE -->
-<!-- ================================================= -->
-
-<div id="marketPage" class="hidden">
-
-    <div class="card">
-
-        <h2>Create Marketplace Order</h2>
-
-        <select id="orderType">
-
-            <option value="buy">
-                Buy MesCoin
-            </option>
-
-            <option value="sell">
-                Sell MesCoin
-            </option>
-
-        </select>
-
-
-        <input
-            type="number"
-            id="orderAmount"
-            placeholder="MesCoin amount"
-            min="0"
-            step="0.01">
-
-
-        <input
-            type="number"
-            id="orderPrice"
-            placeholder="Price per MES"
-            min="0"
-            step="0.01">
-
-
-        <button
-            onclick="createOrder()">
-
-            Place Order
-
-        </button>
-
-    </div>
-
-
-    <div class="card">
-
-        <h2>Marketplace</h2>
-
-        <button
-            class="gray"
-            onclick="loadOrders()">
-
-            Refresh Orders
-
-        </button>
-
-        <div id="ordersList">
-            Loading orders...
-        </div>
-
-    </div>
-
-</div>
-
-
-</div>
 
 </div>
 
@@ -570,150 +486,140 @@ button.gray {
 <script>
 
 /* =====================================================
-   SERVER ADDRESS
+   MESCOIN SERVER
 ===================================================== */
 
-const SERVER_URL =
-    "https://mescoin-1.onrender.com";
+const API = "https://mescoin-1.onrender.com";
 
 
 /* =====================================================
-   CURRENT USER
+   HELPERS
 ===================================================== */
 
-let currentUser =
-    JSON.parse(
-        localStorage.getItem("mescoinUser")
-    );
+function showMessage(id, text) {
+
+    const element = document.getElementById(id);
+
+    element.textContent = text;
+    element.classList.remove("hidden");
+}
 
 
-/* =====================================================
-   SERVER REQUEST
-===================================================== */
+function hideMessage(id) {
 
-async function apiRequest(
-    endpoint,
-    options = {}
-) {
+    document.getElementById(id)
+        .classList.add("hidden");
+}
 
-    try {
 
-        const response =
-            await fetch(
-                SERVER_URL + endpoint,
-                {
-                    ...options,
-                    headers: {
-                        "Content-Type":
-                            "application/json",
-                        ...(options.headers || {})
-                    }
-                }
-            );
+function getToken() {
 
-        const data =
-            await response.json();
+    return localStorage.getItem("mescoin_token");
 
-        if (!response.ok) {
+}
 
-            throw new Error(
-                data.message ||
-                "Server request failed"
-            );
 
-        }
+function headers() {
 
-        return data;
+    const token = getToken();
 
-    } catch (error) {
+    const h = {
+        "Content-Type": "application/json"
+    };
 
-        throw error;
-
+    if (token) {
+        h["Authorization"] = "Bearer " + token;
     }
 
+    return h;
 }
 
 
 /* =====================================================
-   MESSAGE
-===================================================== */
-
-function showMessage(
-    message,
-    type = "success"
-) {
-
-    const box =
-        document.getElementById("message");
-
-    box.textContent = message;
-
-    box.className =
-        "message " + type;
-
-    setTimeout(() => {
-
-        box.className =
-            "message";
-
-    }, 4000);
-
-}
-
-
-/* =====================================================
-   CHECK SERVER
+   SERVER STATUS
 ===================================================== */
 
 async function checkServer() {
 
     const status =
-        document.getElementById(
-            "connectionStatus"
-        );
+        document.getElementById("serverStatus");
+
+    status.className = "status checking";
+    status.textContent = "Checking server...";
+
+    const controller = new AbortController();
+
+    const timeout =
+        setTimeout(() => {
+            controller.abort();
+        }, 15000);
 
     try {
 
-        const data =
-            await apiRequest(
-                "/api/status"
+        const response = await fetch(
+            API + "/api/status",
+            {
+                method: "GET",
+                cache: "no-store",
+                signal: controller.signal
+            }
+        );
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            throw new Error(
+                "HTTP " + response.status
             );
+        }
+
+        const data =
+            await response.json();
 
         if (
-            data.success &&
+            data.success === true ||
             data.status === "online"
         ) {
 
+            status.className =
+                "status online";
+
             status.textContent =
-                "● Server Connected";
+                "Server connected";
 
-            status.classList.add(
-                "online"
-            );
-
-            updatePrice(
-                data.price
-            );
-
-        } else {
-
-            throw new Error(
-                "Server offline"
-            );
-
+            return true;
         }
+
+        throw new Error(
+            "Server returned invalid status"
+        );
 
     } catch (error) {
 
-        status.textContent =
-            "● Server Offline";
+        clearTimeout(timeout);
 
-        status.classList.remove(
-            "online"
+        status.className =
+            "status offline";
+
+        if (error.name === "AbortError") {
+
+            status.textContent =
+                "Server timeout";
+
+        } else {
+
+            status.textContent =
+                "Server connection failed";
+
+        }
+
+        console.log(
+            "MesCoin server error:",
+            error
         );
 
+        return false;
     }
-
 }
 
 
@@ -721,7 +627,7 @@ async function checkServer() {
    REGISTER
 ===================================================== */
 
-async function register() {
+async function registerAccount() {
 
     const username =
         document.getElementById(
@@ -738,30 +644,29 @@ async function register() {
             "registerPassword"
         ).value;
 
-    if (
-        !username ||
-        !email ||
-        !password
-    ) {
+    if (!username || !email || !password) {
 
         showMessage(
-            "Please fill in all registration fields",
-            "error"
+            "registerMessage",
+            "Please fill in all fields."
         );
 
         return;
-
     }
 
+    showMessage(
+        "registerMessage",
+        "Creating account..."
+    );
 
     try {
 
-        const data =
-            await apiRequest(
-                "/api/register",
+        const response =
+            await fetch(
+                API + "/api/auth/register",
                 {
                     method: "POST",
-
+                    headers: headers(),
                     body: JSON.stringify({
                         username,
                         email,
@@ -770,36 +675,43 @@ async function register() {
                 }
             );
 
+        const data =
+            await response.json();
 
-        if (data.success) {
+        if (!response.ok) {
 
-            showMessage(
-                "Account created successfully. You can now login."
+            throw new Error(
+                data.message ||
+                data.error ||
+                "Registration failed"
+            );
+        }
+
+        if (data.token) {
+
+            localStorage.setItem(
+                "mescoin_token",
+                data.token
             );
 
-            document.getElementById(
-                "registerUsername"
-            ).value = "";
+            showApp();
 
-            document.getElementById(
-                "registerEmail"
-            ).value = "";
-
-            document.getElementById(
-                "registerPassword"
-            ).value = "";
-
+            return;
         }
+
+        showMessage(
+            "registerMessage",
+            data.message ||
+            "Account created. You can now login."
+        );
 
     } catch (error) {
 
         showMessage(
-            error.message,
-            "error"
+            "registerMessage",
+            error.message
         );
-
     }
-
 }
 
 
@@ -819,27 +731,29 @@ async function login() {
             "loginPassword"
         ).value;
 
-
     if (!email || !password) {
 
         showMessage(
-            "Enter email and password",
-            "error"
+            "loginMessage",
+            "Enter your email and password."
         );
 
         return;
-
     }
 
+    showMessage(
+        "loginMessage",
+        "Logging in..."
+    );
 
     try {
 
-        const data =
-            await apiRequest(
-                "/api/login",
+        const response =
+            await fetch(
+                API + "/api/auth/login",
                 {
                     method: "POST",
-
+                    headers: headers(),
                     body: JSON.stringify({
                         email,
                         password
@@ -847,194 +761,223 @@ async function login() {
                 }
             );
 
+        const data =
+            await response.json();
 
-        if (data.success) {
+        if (!response.ok) {
 
-            currentUser =
-                data.user;
-
-            localStorage.setItem(
-                "mescoinUser",
-                JSON.stringify(
-                    currentUser
-                )
+            throw new Error(
+                data.message ||
+                data.error ||
+                "Login failed"
             );
-
-
-            document.getElementById(
-                "authPage"
-            ).classList.add(
-                "hidden"
-            );
-
-            document.getElementById(
-                "appPage"
-            ).classList.remove(
-                "hidden"
-            );
-
-
-            updateUserInfo();
-
-            await loadPortfolio();
-
-            showMessage(
-                "Login successful"
-            );
-
         }
+
+        if (!data.token) {
+
+            throw new Error(
+                "Server did not return login token."
+            );
+        }
+
+        localStorage.setItem(
+            "mescoin_token",
+            data.token
+        );
+
+        showApp();
 
     } catch (error) {
 
         showMessage(
-            error.message,
-            "error"
+            "loginMessage",
+            error.message
         );
-
     }
-
 }
 
 
 /* =====================================================
-   UPDATE USER INFO
+   SHOW APP
 ===================================================== */
 
-function updateUserInfo() {
+async function showApp() {
 
-    if (!currentUser) {
-        return;
-    }
+    document
+        .getElementById("authPage")
+        .classList.add("hidden");
 
+    document
+        .getElementById("appPage")
+        .classList.remove("hidden");
 
-    document.getElementById(
-        "usernameDisplay"
-    ).textContent =
-        currentUser.username;
-
-
-    document.getElementById(
-        "emailDisplay"
-    ).textContent =
-        currentUser.email;
-
+    await loadAccount();
+    await loadPortfolio();
+    await loadMarket();
+    await loadOrders();
+    await loadTrades();
 }
 
 
 /* =====================================================
-   LOAD PORTFOLIO
+   ACCOUNT
+===================================================== */
+
+async function loadAccount() {
+
+    try {
+
+        const response =
+            await fetch(
+                API + "/api/me",
+                {
+                    headers: headers()
+                }
+            );
+
+        if (!response.ok) {
+            return;
+        }
+
+        const data =
+            await response.json();
+
+        const user =
+            data.user || data;
+
+        if (user.username) {
+
+            document.getElementById(
+                "welcome"
+            ).textContent =
+                "Welcome, " + user.username;
+        }
+
+    } catch (error) {
+
+        console.log(
+            "Account error:",
+            error
+        );
+    }
+}
+
+
+/* =====================================================
+   PORTFOLIO
 ===================================================== */
 
 async function loadPortfolio() {
 
-    if (!currentUser) {
-        return;
-    }
-
-
     try {
 
-        const data =
-            await apiRequest(
-                "/api/portfolio/" +
-                currentUser.id
+        const response =
+            await fetch(
+                API + "/api/portfolio",
+                {
+                    headers: headers()
+                }
             );
 
+        if (!response.ok) {
 
-        if (!data.success) {
-            return;
+            throw new Error(
+                "Portfolio request failed"
+            );
         }
 
+        const data =
+            await response.json();
 
-        const p =
-            data.portfolio;
+        const portfolio =
+            data.portfolio || data;
 
+        const mes =
+            portfolio.mes_balance ??
+            portfolio.mesBalance ??
+            portfolio.mes ??
+            0;
 
-        document.getElementById(
-            "portfolioMescoin"
-        ).textContent =
-            Number(
-                p.mescoin
-            ).toFixed(2) +
-            " MES";
-
-
-        document.getElementById(
-            "portfolioCash"
-        ).textContent =
-            "$" +
-            Number(
-                p.cash
-            ).toFixed(2);
-
+        const cash =
+            portfolio.cash_balance ??
+            portfolio.cashBalance ??
+            portfolio.cash ??
+            0;
 
         document.getElementById(
-            "portfolioPrice"
+            "mesBalance"
         ).textContent =
-            "$" +
-            Number(
-                p.price
-            ).toFixed(2);
-
+            Number(mes).toFixed(2) + " MES";
 
         document.getElementById(
-            "portfolioMesValue"
+            "cashBalance"
         ).textContent =
-            "$" +
-            Number(
-                p.mesValue
-            ).toFixed(2);
-
-
-        document.getElementById(
-            "portfolioTotal"
-        ).textContent =
-            "$" +
-            Number(
-                p.totalValue
-            ).toFixed(2);
-
-
-        updatePrice(
-            p.price
-        );
+            Number(cash).toFixed(2);
 
     } catch (error) {
 
-        showMessage(
-            error.message,
-            "error"
+        console.log(
+            "Portfolio error:",
+            error
         );
-
     }
-
 }
 
 
 /* =====================================================
-   UPDATE PRICE
+   MARKET
 ===================================================== */
 
-function updatePrice(price) {
+async function loadMarket() {
 
-    if (price === undefined) {
-        return;
+    try {
+
+        const response =
+            await fetch(
+                API + "/api/market",
+                {
+                    headers: headers()
+                }
+            );
+
+        if (!response.ok) {
+
+            throw new Error(
+                "Market request failed"
+            );
+        }
+
+        const data =
+            await response.json();
+
+        const price =
+            data.price ??
+            data.currentPrice ??
+            data.market?.price ??
+            0;
+
+        document.getElementById(
+            "coinPrice"
+        ).textContent =
+            Number(price).toFixed(2);
+
+        document.getElementById(
+            "marketPrice"
+        ).textContent =
+            Number(price).toFixed(2);
+
+    } catch (error) {
+
+        console.log(
+            "Market error:",
+            error
+        );
+
+        document.getElementById(
+            "marketPrice"
+        ).textContent =
+            "Unavailable";
     }
-
-
-    document.getElementById(
-        "tradePrice"
-    ).textContent =
-        "$" +
-        Number(price).toFixed(2);
-
-
-    document.getElementById(
-        "portfolioPrice"
-    ).textContent =
-        "$" +
-        Number(price).toFixed(2);
-
 }
 
 
@@ -1042,105 +985,82 @@ function updatePrice(price) {
    BUY
 ===================================================== */
 
-async function buyMescoin() {
-
-    if (!currentUser) {
-        return;
-    }
-
+async function buyMesCoin() {
 
     const amount =
         Number(
             document.getElementById(
-                "buyAmount"
+                "tradeAmount"
             ).value
         );
-
 
     if (!amount || amount <= 0) {
 
         showMessage(
-            "Enter a valid MesCoin amount",
-            "error"
+            "tradeMessage",
+            "Enter a valid MES amount."
         );
 
         return;
-
     }
 
-
-    const confirmed =
-        confirm(
-            "Buy " +
-            amount +
-            " MES?"
-        );
-
-
-    if (!confirmed) {
+    if (!confirm(
+        "Buy " + amount + " MES?"
+    )) {
         return;
     }
 
+    showMessage(
+        "tradeMessage",
+        "Sending buy order..."
+    );
 
     try {
 
-        const data =
-            await apiRequest(
-                "/api/buy",
+        const response =
+            await fetch(
+                API + "/api/trade/buy",
                 {
                     method: "POST",
-
+                    headers: headers(),
                     body: JSON.stringify({
-                        userId:
-                            currentUser.id,
-
-                        amount:
-                            amount
+                        amount
                     })
                 }
             );
 
+        const data =
+            await response.json();
 
-        if (data.success) {
+        if (!response.ok) {
 
-            currentUser.mescoin =
-                data.mescoin;
-
-            currentUser.cash =
-                data.cash;
-
-
-            localStorage.setItem(
-                "mescoinUser",
-                JSON.stringify(
-                    currentUser
-                )
+            throw new Error(
+                data.message ||
+                data.error ||
+                "Buy failed"
             );
-
-
-            showMessage(
-                data.message
-            );
-
-
-            document.getElementById(
-                "buyAmount"
-            ).value = "";
-
-
-            await loadPortfolio();
-
         }
+
+        showMessage(
+            "tradeMessage",
+            data.message ||
+            "Buy completed successfully."
+        );
+
+        document.getElementById(
+            "tradeAmount"
+        ).value = "";
+
+        await loadPortfolio();
+        await loadTrades();
 
     } catch (error) {
 
         showMessage(
-            error.message,
-            "error"
+            "tradeMessage",
+            error.message
         );
-
     }
-
 }
 
 
@@ -1148,76 +1068,37 @@ async function buyMescoin() {
    SELL
 ===================================================== */
 
-async function sellMescoin() {
-
-    if (!currentUser) {
-        return;
-    }
-
+async function sellMesCoin() {
 
     const amount =
         Number(
             document.getElementById(
-                "sellAmount"
+                "tradeAmount"
             ).value
         );
-
 
     if (!amount || amount <= 0) {
 
         showMessage(
-            "Enter a valid MesCoin amount",
-            "error"
+            "tradeMessage",
+            "Enter a valid MES amount."
         );
 
         return;
-
     }
 
-
-    const confirmed =
-        confirm(
-            "Sell " +
-            amount +
-            " MES?"
-        );
-
-
-    if (!confirmed) {
+    if (!confirm(
+        "Sell " + amount + " MES?"
+    )) {
         return;
     }
 
+    showMessage(
+        "tradeMessage",
+        "Sending sell order..."
+    );
 
     try {
 
-        const data =
-            await apiRequest(
-                "/api/sell",
-                {
-                    method: "POST",
-
-                    body: JSON.stringify({
-                        userId:
-                            currentUser.id,
-
-                        amount:
-                            amount
-                    })
-                }
-            );
-
-
-        if (data.success) {
-
-            currentUser.mescoin =
-                data.mescoin;
-
-            currentUser.cash =
-                data.cash;
-
-
-            localStorage.setItem(
-                "mescoinUser",
-                JSON.stringify(
-                    currentUser
-                
+        const response =
+            
