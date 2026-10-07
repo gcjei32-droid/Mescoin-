@@ -826,5 +826,22 @@ app.post("/api/price", (req, res) => {
         message: "MesCoin price updated."
     });
 });
+// ======================================================
+// START SERVER
+// ======================================================
 
-// ====
+async function startServer() {
+    try {
+        await setupDatabase();
+
+        app.listen(PORT, "0.0.0.0", () => {
+            console.log(`MesCoin server is running on port ${PORT}`);
+            console.log(`Server status: ONLINE`);
+        });
+
+    } catch (error) {
+        console.error("Server startup error:", error);
+    }
+}
+
+startServer();
