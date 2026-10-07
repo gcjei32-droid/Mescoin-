@@ -12,8 +12,7 @@ const PORT = process.env.PORT || 3000;
 // ======================================================
 
 app.use(cors());
-app.use(express.json());
-
+app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // ======================================================
@@ -29,143 +28,164 @@ if (process.env.DATABASE_URL) {
             rejectUnauthorized: false
         }
     });
-
-    pool.on("error", (err) => {
-        console.error("Database error:", err.message);
-    });
-
-    console.log("DATABASE_URL found.");
-} else {
-    console.log("WARNING: DATABASE_URL is not set.");
 }
-
-// ======================================================
-// CREATE DATABASE TABLES
-// ======================================================
-
-async function setupDatabase() {
-    if (!pool) {
-        console.log("Database setup skipped because DATABASE_URL is missing.");
-        return;
-    }
-
-    try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) UNIQUE NOT NULL,
-                email VARCHAR(150) UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                mes_balance NUMERIC(20,8) DEFAULT 100,
-                cash_balance NUMERIC(20,2) DEFAULT 1000,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS orders (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                type VARCHAR(10) NOT NULL,
-                amount NUMERIC(20,8) NOT NULL,
-                price NUMERIC(20,8) NOT NULL,
-                status VARCHAR(20) DEFAULT 'open',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS sessions (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                token TEXT UNIQUE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-
-        console.log("Database tables are ready.");
-    } catch (error) {
-        console.error("Database setup failed:", error.message);
-    }
-}
-
-// ======================================================
-// MESCOIN SETTINGS
-// ======================================================
-
-let mescoinPrice = 1.00;
 
 // ======================================================
 // PASSWORD FUNCTIONS
 // ======================================================
 
 function hashPassword(password) {
-    return crypto
-        .createHash("sha256")
-        .update(password)
-        .digest("hex");
+    const salt = crypto.randomBytes(16).toString("hex");
+
+    const hash = crypto
+        .scryptSync(password, salt, 64)
+        .toString("hex");
+
+    return `${salt}:${hash}`;
 }
 
-function createToken() {
-    return crypto.randomBytes(32).toString("hex");
+function checkPassword(password, storedPassword) {
+    try {
+        const parts = storedPassword.split(":");
+
+        if (parts.length !== 2) {
+            return false;
+        }
+
+        const salt = parts[0];
+        const originalHash = parts[1];
+
+        const hash = crypto
+            .scryptSync(password, salt, 64)
+            .toString("hex");
+
+        return crypto.timingSafeEqual(
+            Buffer.from(hash, "hex"),
+            Buffer.from(originalHash, "hex")
+        );
+    } catch {
+        return false;
+    }
 }
 
 // ======================================================
-// AUTHENTICATION MIDDLEWARE
+// DATABASE SETUP
+// ======================================================
+
+async function setupDatabase() {
+    if (!pool) {
+        console.log("DATABASE_URL is not configured.");
+        return;
+    }
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            mes_balance NUMERIC(20,8) NOT NULL DEFAULT 100,
+            cash_balance NUMERIC(20,2) NOT NULL DEFAULT 1000,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS sessions (
+            id SERIAL PRIMARY KEY,
+            token TEXT UNIQUE NOT NULL,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS trades (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            action TEXT NOT NULL,
+            amount NUMERIC(20,8) NOT NULL,
+            price NUMERIC(20,8) NOT NULL,
+            total NUMERIC(20,2) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS marketplace_orders (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            type TEXT NOT NULL,
+            amount NUMERIC(20,8) NOT NULL,
+            price NUMERIC(20,8) NOT NULL,
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS marketplace_messages (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL REFERENCES marketplace_orders(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    console.log("Database tables ready.");
+}
+
+// ======================================================
+// AUTH MIDDLEWARE
 // ======================================================
 
 async function authenticate(req, res, next) {
     if (!pool) {
         return res.status(500).json({
             success: false,
-            message: "Database is not connected."
+            message: "Database is not configured on the server."
         });
     }
 
-    const authHeader = req.headers.authorization;
+    const auth = req.headers.authorization || "";
 
-    if (!authHeader) {
+    if (!auth.startsWith("Bearer ")) {
         return res.status(401).json({
             success: false,
-            message: "Please sign in."
+            message: "Please login first."
         });
     }
 
-    const token = authHeader.replace("Bearer ", "").trim();
-
-    if (!token) {
-        return res.status(401).json({
-            success: false,
-            message: "Invalid login token."
-        });
-    }
+    const token = auth.substring(7);
 
     try {
-        const result = await pool.query(
-            `
-            SELECT users.*
+        const result = await pool.query(`
+            SELECT
+                users.id,
+                users.name,
+                users.email,
+                users.mes_balance,
+                users.cash_balance
             FROM sessions
             JOIN users ON users.id = sessions.user_id
             WHERE sessions.token = $1
-            `,
-            [token]
-        );
+        `, [token]);
 
         if (result.rows.length === 0) {
             return res.status(401).json({
                 success: false,
-                message: "Session expired. Please sign in again."
+                message: "Session expired. Please login again."
             });
         }
 
         req.user = result.rows[0];
-
         next();
 
     } catch (error) {
-        console.error("Authentication error:", error);
+        console.error(error);
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Authentication failed."
         });
@@ -173,121 +193,117 @@ async function authenticate(req, res, next) {
 }
 
 // ======================================================
-// SERVER STATUS
+// HEALTH CHECK
+// ======================================================
+
+app.get("/api/status", async (req, res) => {
+    let database = "not configured";
+
+    if (pool) {
+        try {
+            await pool.query("SELECT 1");
+            database = "connected";
+        } catch {
+            database = "error";
+        }
+    }
+
+    res.json({
+        success: true,
+        status: "online",
+        server: "MesCoin server",
+        database,
+        time: new Date().toISOString()
+    });
+});
+
+// ======================================================
+// HOME
 // ======================================================
 
 app.get("/", (req, res) => {
     res.json({
         success: true,
         status: "online",
-        message: "MesCoin server is running!",
-        price: mescoinPrice,
-        database: pool ? "configured" : "not configured"
-    });
-});
-
-app.get("/api/status", async (req, res) => {
-
-    let databaseStatus = "not connected";
-
-    if (pool) {
-        try {
-            await pool.query("SELECT 1");
-            databaseStatus = "connected";
-        } catch (error) {
-            databaseStatus = "error";
-        }
-    }
-
-    res.json({
-        success: true,
-        status: "online",
-        message: "MesCoin server is connected",
-        price: mescoinPrice,
-        database: databaseStatus,
-        time: new Date().toISOString()
+        message: "MesCoin server is running"
     });
 });
 
 // ======================================================
-// SIGN UP
+// CREATE ACCOUNT
 // ======================================================
 
-app.post("/api/signup", async (req, res) => {
-
+app.post("/api/auth/register", async (req, res) => {
     if (!pool) {
         return res.status(500).json({
             success: false,
-            message: "Database is not connected."
+            message: "Database is not configured."
         });
     }
 
-    const { username, email, password } = req.body;
+    const name = String(req.body.name || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
 
-    if (!username || !email || !password) {
+    if (!name || !email || !password) {
         return res.status(400).json({
             success: false,
-            message: "Username, email and password are required."
+            message: "Name, email and password are required."
         });
     }
 
-    if (password.length < 6) {
+    if (password.length < 4) {
         return res.status(400).json({
             success: false,
-            message: "Password must contain at least 6 characters."
+            message: "Password must be at least 4 characters."
         });
     }
 
     try {
-
         const existing = await pool.query(
-            `
-            SELECT id
-            FROM users
-            WHERE username = $1 OR email = $2
-            `,
-            [username, email]
+            "SELECT id FROM users WHERE email = $1",
+            [email]
         );
 
         if (existing.rows.length > 0) {
             return res.status(409).json({
                 success: false,
-                message: "Username or email already exists."
+                message: "An account with this email already exists."
             });
         }
 
         const passwordHash = hashPassword(password);
 
-        const result = await pool.query(
-            `
+        const result = await pool.query(`
             INSERT INTO users
-            (username, email, password_hash, mes_balance, cash_balance)
+            (name, email, password, mes_balance, cash_balance)
             VALUES ($1, $2, $3, 100, 1000)
-            RETURNING id, username, email, mes_balance, cash_balance, created_at
-            `,
-            [username, email, passwordHash]
-        );
+            RETURNING id, name, email, mes_balance, cash_balance
+        `, [
+            name,
+            email,
+            passwordHash
+        ]);
 
         const user = result.rows[0];
 
-        const token = createToken();
+        const token = crypto.randomBytes(32).toString("hex");
 
-        await pool.query(
-            `
-            INSERT INTO sessions
-            (user_id, token)
+        await pool.query(`
+            INSERT INTO sessions (token, user_id)
             VALUES ($1, $2)
-            `,
-            [user.id, token]
-        );
+        `, [
+            token,
+            user.id
+        ]);
 
-        res.json({
+        return res.status(201).json({
             success: true,
             message: "Account created successfully.",
             token,
             user: {
                 id: user.id,
-                username: user.username,
+                name: user.name,
                 email: user.email,
                 mesBalance: Number(user.mes_balance),
                 cashBalance: Number(user.cash_balance)
@@ -295,10 +311,9 @@ app.post("/api/signup", async (req, res) => {
         });
 
     } catch (error) {
+        console.error("REGISTER ERROR:", error);
 
-        console.error("Signup error:", error);
-
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Could not create account."
         });
@@ -309,16 +324,16 @@ app.post("/api/signup", async (req, res) => {
 // LOGIN
 // ======================================================
 
-app.post("/api/login", async (req, res) => {
-
+app.post("/api/auth/login", async (req, res) => {
     if (!pool) {
         return res.status(500).json({
             success: false,
-            message: "Database is not connected."
+            message: "Database is not configured."
         });
     }
 
-    const { email, password } = req.body;
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
 
     if (!email || !password) {
         return res.status(400).json({
@@ -328,52 +343,44 @@ app.post("/api/login", async (req, res) => {
     }
 
     try {
-
-        const passwordHash = hashPassword(password);
-
         const result = await pool.query(
-            `
-            SELECT *
-            FROM users
-            WHERE email = $1
-            `,
+            "SELECT * FROM users WHERE email = $1",
             [email]
         );
 
         if (result.rows.length === 0) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password."
+                message: "Incorrect email or password."
             });
         }
 
         const user = result.rows[0];
 
-        if (user.password_hash !== passwordHash) {
+        if (!checkPassword(password, user.password)) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password."
+                message: "Incorrect email or password."
             });
         }
 
-        const token = createToken();
+        const token = crypto.randomBytes(32).toString("hex");
 
-        await pool.query(
-            `
-            INSERT INTO sessions
-            (user_id, token)
+        await pool.query(`
+            INSERT INTO sessions (token, user_id)
             VALUES ($1, $2)
-            `,
-            [user.id, token]
-        );
+        `, [
+            token,
+            user.id
+        ]);
 
-        res.json({
+        return res.json({
             success: true,
             message: "Login successful.",
             token,
             user: {
                 id: user.id,
-                username: user.username,
+                name: user.name,
                 email: user.email,
                 mesBalance: Number(user.mes_balance),
                 cashBalance: Number(user.cash_balance)
@@ -381,10 +388,9 @@ app.post("/api/login", async (req, res) => {
         });
 
     } catch (error) {
+        console.error("LOGIN ERROR:", error);
 
-        console.error("Login error:", error);
-
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Login failed."
         });
@@ -395,47 +401,30 @@ app.post("/api/login", async (req, res) => {
 // LOGOUT
 // ======================================================
 
-app.post("/api/logout", authenticate, async (req, res) => {
+app.post("/api/auth/logout", authenticate, async (req, res) => {
+    const token = req.headers.authorization.substring(7);
 
-    const token = req.headers.authorization
-        .replace("Bearer ", "")
-        .trim();
+    await pool.query(
+        "DELETE FROM sessions WHERE token = $1",
+        [token]
+    );
 
-    try {
-
-        await pool.query(
-            `
-            DELETE FROM sessions
-            WHERE token = $1
-            `,
-            [token]
-        );
-
-        res.json({
-            success: true,
-            message: "Logged out successfully."
-        });
-
-    } catch (error) {
-
-        res.status(500).json({
-            success: false,
-            message: "Logout failed."
-        });
-    }
+    res.json({
+        success: true,
+        message: "Logged out."
+    });
 });
 
 // ======================================================
-// ACCOUNT INFORMATION
+// PROFILE / PORTFOLIO
 // ======================================================
 
-app.get("/api/account", authenticate, async (req, res) => {
-
+app.get("/api/me", authenticate, async (req, res) => {
     res.json({
         success: true,
         user: {
             id: req.user.id,
-            username: req.user.username,
+            name: req.user.name,
             email: req.user.email,
             mesBalance: Number(req.user.mes_balance),
             cashBalance: Number(req.user.cash_balance)
@@ -443,43 +432,78 @@ app.get("/api/account", authenticate, async (req, res) => {
     });
 });
 
+app.get("/api/portfolio", authenticate, async (req, res) => {
+    const price = 1;
+
+    const mesBalance = Number(req.user.mes_balance);
+    const cashBalance = Number(req.user.cash_balance);
+
+    res.json({
+        success: true,
+        portfolio: {
+            mesBalance,
+            cashBalance,
+            mesValue: mesBalance * price,
+            totalValue: cashBalance + mesBalance * price
+        }
+    });
+});
+
 // ======================================================
-// BUY MESCOIN
+// MARKET PRICE
 // ======================================================
 
-app.post("/api/buy", authenticate, async (req, res) => {
+let mesPrice = 1.00;
 
+app.get("/api/market", (req, res) => {
+    const movement = (Math.random() - 0.5) * 0.04;
+
+    mesPrice += movement;
+
+    if (mesPrice < 0.10) {
+        mesPrice = 0.10;
+    }
+
+    res.json({
+        success: true,
+        symbol: "MES",
+        price: Number(mesPrice.toFixed(4)),
+        time: new Date().toISOString()
+    });
+});
+
+// ======================================================
+// BUY MES
+// ======================================================
+
+app.post("/api/trade/buy", authenticate, async (req, res) => {
     const amount = Number(req.body.amount);
 
     if (!Number.isFinite(amount) || amount <= 0) {
         return res.status(400).json({
             success: false,
-            message: "Enter a valid amount."
+            message: "Enter a valid MES amount."
         });
     }
 
-    const totalCost = amount * mescoinPrice;
+    const price = mesPrice;
+    const total = amount * price;
 
     const client = await pool.connect();
 
     try {
-
         await client.query("BEGIN");
 
-        const userResult = await client.query(
-            `
+        const locked = await client.query(`
             SELECT *
             FROM users
             WHERE id = $1
             FOR UPDATE
-            `,
-            [req.user.id]
-        );
+        `, [req.user.id]);
 
-        const user = userResult.rows[0];
+        const user = locked.rows[0];
 
-        if (Number(user.cash_balance) < totalCost) {
-
+        if (Number(user.cash_balance) < total) {
             await client.query("ROLLBACK");
 
             return res.status(400).json({
@@ -488,44 +512,51 @@ app.post("/api/buy", authenticate, async (req, res) => {
             });
         }
 
-        const newCash =
-            Number(user.cash_balance) - totalCost;
-
-        const newMes =
-            Number(user.mes_balance) + amount;
-
-        await client.query(
-            `
+        const updated = await client.query(`
             UPDATE users
-            SET cash_balance = $1,
-                mes_balance = $2
+            SET
+                cash_balance = cash_balance - $1,
+                mes_balance = mes_balance + $2
             WHERE id = $3
-            `,
-            [newCash, newMes, req.user.id]
-        );
+            RETURNING mes_balance, cash_balance
+        `, [
+            total,
+            amount,
+            req.user.id
+        ]);
+
+        await client.query(`
+            INSERT INTO trades
+            (user_id, action, amount, price, total)
+            VALUES ($1, 'BUY', $2, $3, $4)
+        `, [
+            req.user.id,
+            amount,
+            price,
+            total
+        ]);
 
         await client.query("COMMIT");
 
         res.json({
             success: true,
-            action: "buy",
+            message: "Buy successful.",
+            action: "BUY",
             amount,
-            price: mescoinPrice,
-            total: totalCost,
-            mesBalance: newMes,
-            cashBalance: newCash,
-            message: "MesCoin purchased successfully."
+            price,
+            total,
+            mesBalance: Number(updated.rows[0].mes_balance),
+            cashBalance: Number(updated.rows[0].cash_balance)
         });
 
     } catch (error) {
-
         await client.query("ROLLBACK");
 
-        console.error("Buy error:", error);
+        console.error("BUY ERROR:", error);
 
         res.status(500).json({
             success: false,
-            message: "Buy transaction failed."
+            message: "Buy failed."
         });
 
     } finally {
@@ -534,12 +565,137 @@ app.post("/api/buy", authenticate, async (req, res) => {
 });
 
 // ======================================================
-// SELL MESCOIN
+// SELL MES
 // ======================================================
 
-app.post("/api/sell", authenticate, async (req, res) => {
-
+app.post("/api/trade/sell", authenticate, async (req, res) => {
     const amount = Number(req.body.amount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({
+            success: false,
+            message: "Enter a valid MES amount."
+        });
+    }
+
+    const price = mesPrice;
+    const total = amount * price;
+
+    const client = await pool.connect();
+
+    try {
+        await client.query("BEGIN");
+
+        const locked = await client.query(`
+            SELECT *
+            FROM users
+            WHERE id = $1
+            FOR UPDATE
+        `, [req.user.id]);
+
+        const user = locked.rows[0];
+
+        if (Number(user.mes_balance) < amount) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                success: false,
+                message: "Insufficient MES balance."
+            });
+        }
+
+        const updated = await client.query(`
+            UPDATE users
+            SET
+                mes_balance = mes_balance - $1,
+                cash_balance = cash_balance + $2
+            WHERE id = $3
+            RETURNING mes_balance, cash_balance
+        `, [
+            amount,
+            total,
+            req.user.id
+        ]);
+
+        await client.query(`
+            INSERT INTO trades
+            (user_id, action, amount, price, total)
+            VALUES ($1, 'SELL', $2, $3, $4)
+        `, [
+            req.user.id,
+            amount,
+            price,
+            total
+        ]);
+
+        await client.query("COMMIT");
+
+        res.json({
+            success: true,
+            message: "Sell successful.",
+            action: "SELL",
+            amount,
+            price,
+            total,
+            mesBalance: Number(updated.rows[0].mes_balance),
+            cashBalance: Number(updated.rows[0].cash_balance)
+        });
+
+    } catch (error) {
+        await client.query("ROLLBACK");
+
+        console.error("SELL ERROR:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Sell failed."
+        });
+
+    } finally {
+        client.release();
+    }
+});
+
+// ======================================================
+// TRADE HISTORY
+// ======================================================
+
+app.get("/api/trades", authenticate, async (req, res) => {
+    const result = await pool.query(`
+        SELECT
+            id,
+            action,
+            amount,
+            price,
+            total,
+            created_at
+        FROM trades
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 100
+    `, [req.user.id]);
+
+    res.json({
+        success: true,
+        trades: result.rows
+    });
+});
+
+// ======================================================
+// MARKETPLACE - CREATE ORDER
+// ======================================================
+
+app.post("/api/marketplace/orders", authenticate, async (req, res) => {
+    const type = String(req.body.type || "").toUpperCase();
+    const amount = Number(req.body.amount);
+    const price = Number(req.body.price);
+
+    if (!["BUY", "SELL"].includes(type)) {
+        return res.status(400).json({
+            success: false,
+            message: "Order type must be BUY or SELL."
+        });
+    }
 
     if (!Number.isFinite(amount) || amount <= 0) {
         return res.status(400).json({
@@ -548,300 +704,67 @@ app.post("/api/sell", authenticate, async (req, res) => {
         });
     }
 
-    const client = await pool.connect();
-
-    try {
-
-        await client.query("BEGIN");
-
-        const userResult = await client.query(
-            `
-            SELECT *
-            FROM users
-            WHERE id = $1
-            FOR UPDATE
-            `,
-            [req.user.id]
-        );
-
-        const user = userResult.rows[0];
-
-        if (Number(user.mes_balance) < amount) {
-
-            await client.query("ROLLBACK");
-
-            return res.status(400).json({
-                success: false,
-                message: "Insufficient MesCoin balance."
-            });
-        }
-
-        const moneyReceived =
-            amount * mescoinPrice;
-
-        const newMes =
-            Number(user.mes_balance) - amount;
-
-        const newCash =
-            Number(user.cash_balance) + moneyReceived;
-
-        await client.query(
-            `
-            UPDATE users
-            SET mes_balance = $1,
-                cash_balance = $2
-            WHERE id = $3
-            `,
-            [newMes, newCash, req.user.id]
-        );
-
-        await client.query("COMMIT");
-
-        res.json({
-            success: true,
-            action: "sell",
-            amount,
-            price: mescoinPrice,
-            total: moneyReceived,
-            mesBalance: newMes,
-            cashBalance: newCash,
-            message: "MesCoin sold successfully."
-        });
-
-    } catch (error) {
-
-        await client.query("ROLLBACK");
-
-        console.error("Sell error:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Sell transaction failed."
-        });
-
-    } finally {
-        client.release();
-    }
-});
-
-// ======================================================
-// CREATE MARKETPLACE ORDER
-// ======================================================
-
-app.post("/api/orders", authenticate, async (req, res) => {
-
-    const { type, amount, price } = req.body;
-
-    const orderAmount = Number(amount);
-    const orderPrice = Number(price);
-
-    if (!["buy", "sell"].includes(type)) {
-        return res.status(400).json({
-            success: false,
-            message: "Order type must be buy or sell."
-        });
-    }
-
-    if (
-        !Number.isFinite(orderAmount) ||
-        orderAmount <= 0 ||
-        !Number.isFinite(orderPrice) ||
-        orderPrice <= 0
-    ) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid order information."
-        });
-    }
-
-    try {
-
-        const result = await pool.query(
-            `
-            INSERT INTO orders
-            (user_id, type, amount, price, status)
-            VALUES ($1, $2, $3, $4, 'open')
-            RETURNING *
-            `,
-            [
-                req.user.id,
-                type,
-                orderAmount,
-                orderPrice
-            ]
-        );
-
-        res.json({
-            success: true,
-            message: "Order created successfully.",
-            order: result.rows[0]
-        });
-
-    } catch (error) {
-
-        console.error("Order error:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Could not create order."
-        });
-    }
-});
-
-// ======================================================
-// GET OPEN MARKETPLACE ORDERS
-// ======================================================
-
-app.get("/api/orders", async (req, res) => {
-
-    if (!pool) {
-        return res.status(500).json({
-            success: false,
-            message: "Database is not connected."
-        });
-    }
-
-    try {
-
-        const result = await pool.query(
-            `
-            SELECT
-                orders.id,
-                orders.type,
-                orders.amount,
-                orders.price,
-                orders.status,
-                orders.created_at,
-                users.username
-            FROM orders
-            JOIN users
-            ON users.id = orders.user_id
-            WHERE orders.status = 'open'
-            ORDER BY orders.created_at DESC
-            `
-        );
-
-        res.json({
-            success: true,
-            orders: result.rows
-        });
-
-    } catch (error) {
-
-        console.error("Orders error:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Could not load orders."
-        });
-    }
-});
-
-// ======================================================
-// CLOSE / CANCEL ORDER
-// ======================================================
-
-app.delete("/api/orders/:id", authenticate, async (req, res) => {
-
-    const orderId = Number(req.params.id);
-
-    if (!Number.isInteger(orderId)) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid order ID."
-        });
-    }
-
-    try {
-
-        const result = await pool.query(
-            `
-            UPDATE orders
-            SET status = 'cancelled'
-            WHERE id = $1
-            AND user_id = $2
-            AND status = 'open'
-            RETURNING *
-            `,
-            [orderId, req.user.id]
-        );
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Order not found or already closed."
-            });
-        }
-
-        res.json({
-            success: true,
-            message: "Order cancelled.",
-            order: result.rows[0]
-        });
-
-    } catch (error) {
-
-        console.error("Cancel order error:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Could not cancel order."
-        });
-    }
-});
-
-// ======================================================
-// PRICE
-// ======================================================
-
-app.get("/api/price", (req, res) => {
-
-    res.json({
-        success: true,
-        currency: "MES",
-        price: mescoinPrice
-    });
-});
-
-// ======================================================
-// CHANGE PRICE
-// ======================================================
-
-app.post("/api/price", (req, res) => {
-
-    const price = Number(req.body.price);
-
     if (!Number.isFinite(price) || price <= 0) {
         return res.status(400).json({
             success: false,
-            message: "Invalid price."
+            message: "Enter a valid price."
         });
     }
 
-    mescoinPrice = price;
-
-    res.json({
-        success: true,
-        price: mescoinPrice,
-        message: "MesCoin price updated."
-    });
-});
-// ======================================================
-// START SERVER
-// ======================================================
-
-async function startServer() {
     try {
-        await setupDatabase();
+        const result = await pool.query(`
+            INSERT INTO marketplace_orders
+            (user_id, type, amount, price)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+        `, [
+            req.user.id,
+            type,
+            amount,
+            price
+        ]);
 
-        app.listen(PORT, "0.0.0.0", () => {
-            console.log(`MesCoin server is running on port ${PORT}`);
-            console.log(`Server status: ONLINE`);
+        res.status(201).json({
+            success: true,
+            message: "Marketplace order created.",
+            order: result.rows[0]
         });
 
     } catch (error) {
-        console.error("Server startup error:", error);
-    }
-}
+        console.error(error);
 
-startServer();
+        res.status(500).json({
+            success: false,
+            message: "Could not create marketplace order."
+        });
+    }
+});
+
+// ======================================================
+// MARKETPLACE - LIST ORDERS
+// ======================================================
+
+app.get("/api/marketplace/orders", authenticate, async (req, res) => {
+    const result = await pool.query(`
+        SELECT
+            marketplace_orders.id,
+            marketplace_orders.type,
+            marketplace_orders.amount,
+            marketplace_orders.price,
+            marketplace_orders.status,
+            marketplace_orders.created_at,
+            users.name AS seller_name
+        FROM marketplace_orders
+        JOIN users ON users.id = marketplace_orders.user_id
+        WHERE marketplace_orders.status = 'OPEN'
+        ORDER BY marketplace_orders.created_at DESC
+        LIMIT 100
+    `);
+
+    res.json({
+        success: true,
+        orders: result.rows
+    });
+});
+
+// =============
