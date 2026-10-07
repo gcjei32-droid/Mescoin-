@@ -755,4 +755,12 @@ app.get("/api/orders", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "Coul
+            message: "Coul// ======================================================
+// START SERVER
+// ======================================================
+
+async function startServer() {
+    try {
+        await initializeDatabase();
+
+        app.listen(PORT
