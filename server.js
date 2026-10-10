@@ -1,71 +1,61 @@
 
 const express = require("express");
 const cors = require("cors");
-const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { Pool } = require("pg");
 const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.use(cors());
-app.use(express.json({ limit: "20kb" }));
+app.use(express.json({ limit: "100kb" }));
 
-// Render Environment Variables
-const DATABASE_URL = process.env.DATABASE_URL;
-const JWT_SECRET = process.env.JWT_SECRET;
+// Required Render environment variables:
+// DATABASE_URL = your Render PostgreSQL Internal Database URL
+// JWT_SECRET = a long, private, random secret
 
-if (!DATABASE_URL || !JWT_SECRET) {
-  console.error("Set DATABASE_URL and JWT_SECRET in Render Environment.");
-  process.exit(1);
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is missing from Render environment variables.");
 }
 
-// Starting market settings. These are used only when the market
-// is first created; existing market reserves are preserved.
-const START_PRICE = Number(process.env.START_PRICE_KES || 2);
-const INITIAL_SUPPLY = Number(process.env.INITIAL_MES_SUPPLY || 1000000);
-
-if (
-  !Number.isFinite(START_PRICE) || START_PRICE <= 0 ||
-  !Number.isFinite(INITIAL_SUPPLY) || INITIAL_SUPPLY <= 0
-) {
-  console.error("START_PRICE_KES and INITIAL_MES_SUPPLY must be positive.");
-  process.exit(1);
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  throw new Error("Set JWT_SECRET to a private random string of at least 32 characters.");
 }
 
 const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  connectionTimeoutMillis: 15000
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL.includes("localhost")
+    ? false
+    : { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
 });
 
-function money(value) {
-  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+const START_PRICE = 2; // KES per MES
+const PRICE_IMPACT = 0.0001;
+const MIN_PRICE = 0.01;
+
+function accountNumber() {
+  return "MES" + crypto.randomBytes(7).toString("hex").toUpperCase();
 }
 
-function amountValue(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0 || n > 100000000) return null;
-  return money(n);
-}
-
-function newAccountNumber() {
-  return "MES" + crypto.randomInt(100000000, 1000000000);
-}
-
-function makeToken(user) {
+function tokenFor(user) {
   return jwt.sign(
-    { id: String(user.id) },
-    JWT_SECRET,
+    { id: user.id },
+    process.env.JWT_SECRET,
     { expiresIn: "7d" }
   );
 }
 
 function authenticate(req, res, next) {
-  const parts = String(req.headers.authorization || "").split(" ");
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ")
+    ? header.slice(7)
+    : "";
 
-  if (parts[0] !== "Bearer" || !parts[1]) {
+  if (!token) {
     return res.status(401).json({
       success: false,
       message: "Please log in first."
@@ -73,154 +63,105 @@ function authenticate(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(parts[1], JWT_SECRET);
-    req.userId = decoded.id;
+    req.auth = jwt.verify(token, process.env.JWT_SECRET);
     next();
   } catch {
     return res.status(401).json({
       success: false,
-      message: "Login expired. Please log in again."
+      message: "Your login has expired. Please log in again."
     });
   }
 }
 
-// Create permanent PostgreSQL tables.
+function positiveAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 && amount <= 100000000
+    ? Math.round(amount * 100000000) / 100000000
+    : null;
+}
+
+function validEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
-      full_name VARCHAR(120) NOT NULL,
-      phone VARCHAR(30) UNIQUE NOT NULL,
+      account_number VARCHAR(32) UNIQUE NOT NULL,
+      full_name VARCHAR(100) NOT NULL,
+      mobile VARCHAR(25) UNIQUE NOT NULL,
       email VARCHAR(254) UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      account_number VARCHAR(20) UNIQUE NOT NULL,
-      mes_balance NUMERIC(24,8) NOT NULL DEFAULT 0
-        CHECK (mes_balance >= 0),
-      cash_balance NUMERIC(24,2) NOT NULL DEFAULT 0
-        CHECK (cash_balance >= 0),
+      mes_balance NUMERIC(24,8) NOT NULL DEFAULT 0,
+      kes_balance NUMERIC(24,2) NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
+    );
 
-  await pool.query(`
+    CREATE TABLE IF NOT EXISTS market (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      price NUMERIC(20,8) NOT NULL DEFAULT 2,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    INSERT INTO market (id, price)
+    VALUES (1, 2)
+    ON CONFLICT (id) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS transactions (
       id BIGSERIAL PRIMARY KEY,
       from_user_id BIGINT REFERENCES users(id),
       to_user_id BIGINT REFERENCES users(id),
       type VARCHAR(30) NOT NULL,
       amount NUMERIC(24,8) NOT NULL,
-      price NUMERIC(24,8) NOT NULL DEFAULT 0,
-      total NUMERIC(24,2) NOT NULL DEFAULT 0,
+      price NUMERIC(20,8) NOT NULL,
+      total_kes NUMERIC(24,2) NOT NULL,
+      reference VARCHAR(80) UNIQUE NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
+    );
+
+    CREATE INDEX IF NOT EXISTS transactions_from_idx
+      ON transactions(from_user_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS transactions_to_idx
+      ON transactions(to_user_id, created_at DESC);
   `);
 
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS tx_sender_idx
-    ON transactions(from_user_id, created_at DESC)
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS tx_receiver_idx
-    ON transactions(to_user_id, created_at DESC)
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS market_state (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      mes_reserve NUMERIC(30,8) NOT NULL CHECK (mes_reserve > 0),
-      kes_reserve NUMERIC(30,8) NOT NULL CHECK (kes_reserve > 0),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  // Seed the market only if it has never been created.
-  // Starting reserves establish a starting price of START_PRICE KES.
-  await pool.query(
-    `INSERT INTO market_state (id, mes_reserve, kes_reserve)
-     VALUES (1, $1, $2)
-     ON CONFLICT (id) DO NOTHING`,
-    [
-      INITIAL_SUPPLY,
-      INITIAL_SUPPLY * START_PRICE
-    ]
-  );
-
-  console.log("MesCoin database tables are ready.");
-}
-
-// The current pool price is KES reserve / MES reserve.
-async function getMarket(client = pool) {
-  const result = await client.query(
-    `SELECT mes_reserve, kes_reserve, updated_at
-     FROM market_state WHERE id = 1`
-  );
-
-  if (!result.rowCount) throw new Error("MARKET_NOT_INITIALIZED");
-
-  const market = result.rows[0];
-  const mesReserve = Number(market.mes_reserve);
-  const kesReserve = Number(market.kes_reserve);
-
-  return {
-    mesReserve,
-    kesReserve,
-    price: kesReserve / mesReserve,
-    updatedAt: market.updated_at
-  };
+  console.log("MesCoin PostgreSQL tables are ready.");
 }
 
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "MesCoin API is running.",
-    status: "/api/status",
-    market: "/api/market"
+    app: "MesCoin",
+    status: "online",
+    message: "MesCoin server is running."
   });
 });
 
-// Real server and database health check.
 app.get("/api/status", async (req, res) => {
   try {
     await pool.query("SELECT 1");
-    const market = await getMarket();
+    const result = await pool.query(
+      "SELECT price, updated_at FROM market WHERE id = 1"
+    );
 
     res.json({
       success: true,
       status: "online",
       database: "connected",
-      priceKES: market.price,
-      message: "MesCoin server and PostgreSQL are connected."
+      currency: "KES",
+      mesPrice: Number(result.rows[0].price),
+      updatedAt: result.rows[0].updated_at
     });
   } catch (err) {
-    console.error("Status error:", err.message);
+    console.error("Status check failed:", err.message);
     res.status(503).json({
       success: false,
       status: "offline",
-      database: "unavailable"
-    });
-  }
-});
-
-// Current price, available pool supply and reserves.
-app.get("/api/market", async (req, res) => {
-  try {
-    const market = await getMarket();
-
-    res.json({
-      success: true,
-      currency: "KES",
-      priceKES: market.price,
-      availableMES: market.mesReserve,
-      kesReserve: market.kesReserve,
-      updatedAt: market.updatedAt,
-      pricing: "automated liquidity pool"
-    });
-  } catch (err) {
-    console.error("Market error:", err.message);
-    res.status(503).json({
-      success: false,
-      message: "Market is not available."
+      database: "unavailable",
+      message: "The database could not be reached."
     });
   }
 });
@@ -229,166 +170,190 @@ app.get("/api/market", async (req, res) => {
 app.post("/api/signup", async (req, res) => {
   try {
     const fullName = String(req.body.fullName || "").trim();
-    const phone = String(req.body.phone || "").trim();
+    const mobile = String(req.body.mobile || "").trim();
     const email = String(req.body.email || "").trim().toLowerCase();
     const password = String(req.body.password || "");
 
-    if (!fullName || !phone || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Enter full name, phone, email and password."
-      });
-    }
-
     if (
-      fullName.length > 120 ||
-      phone.length > 30 ||
-      email.length > 254 ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      fullName.length < 2 ||
+      fullName.length > 100 ||
+      !/^\+?[0-9]{9,15}$/.test(mobile) ||
+      !validEmail(email) ||
+      password.length < 8 ||
+      password.length > 128
     ) {
       return res.status(400).json({
         success: false,
-        message: "Check your name, phone number and email."
+        message: "Enter a valid name, mobile number, email and password of at least 8 characters."
       });
     }
 
-    if (password.length < 8 || password.length > 72) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be 8 to 72 characters."
-      });
-    }
-
-    const hash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, 12);
     let user;
 
-    for (let i = 0; i < 5; i++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await pool.query(
           `INSERT INTO users
-           (full_name, phone, email, password_hash, account_number)
+            (account_number, full_name, mobile, email, password_hash)
            VALUES ($1, $2, $3, $4, $5)
-           RETURNING id, full_name, phone, email, account_number,
-                     mes_balance, cash_balance, created_at`,
-          [fullName, phone, email, hash, newAccountNumber()]
+           RETURNING id, account_number, full_name, mobile, email,
+                     mes_balance, kes_balance, created_at`,
+          [accountNumber(), fullName, mobile, email, passwordHash]
         );
+
         user = result.rows[0];
         break;
       } catch (err) {
-        if (
-          err.code === "23505" &&
-          err.constraint === "users_account_number_key"
-        ) {
-          continue;
-        }
-
         if (err.code === "23505") {
-          return res.status(409).json({
-            success: false,
-            message: "That phone number or email is already registered."
-          });
+          if (err.constraint === "users_mobile_key") {
+            return res.status(409).json({
+              success: false,
+              message: "That mobile number is already registered."
+            });
+          }
+          if (err.constraint === "users_email_key") {
+            return res.status(409).json({
+              success: false,
+              message: "That email is already registered."
+            });
+          }
+          if (attempt < 2) continue;
         }
-
         throw err;
       }
     }
 
-    if (!user) throw new Error("ACCOUNT_NUMBER_GENERATION_FAILED");
+    if (!user) {
+      return res.status(500).json({
+        success: false,
+        message: "Account could not be created."
+      });
+    }
 
     res.status(201).json({
       success: true,
-      message: "Account created.",
-      token: makeToken(user),
-      user
+      message: "MesCoin account created successfully.",
+      token: tokenFor(user),
+      user: formatUser(user)
     });
   } catch (err) {
     console.error("Signup error:", err.message);
     res.status(500).json({
       success: false,
-      message: "Could not create account."
+      message: "Registration failed. Check the server logs if the problem continues."
     });
   }
 });
 
-// LOGIN using email or phone.
+// LOGIN
 app.post("/api/login", async (req, res) => {
   try {
-    const identifier = String(
-      req.body.identifier || req.body.email || req.body.phone || ""
-    ).trim();
+    const login = String(req.body.login || req.body.email || req.body.mobile || "")
+      .trim().toLowerCase();
     const password = String(req.body.password || "");
 
     const result = await pool.query(
       `SELECT * FROM users
-       WHERE LOWER(email) = LOWER($1) OR phone = $1
-       LIMIT 1`,
-      [identifier]
+       WHERE LOWER(email) = $1 OR mobile = $2`,
+      [login, login]
     );
 
-    const user = result.rows[0];
-
     if (
-      !identifier ||
-      !password ||
-      !user ||
-      !(await bcrypt.compare(password, user.password_hash))
+      !result.rows.length ||
+      !(await bcrypt.compare(password, result.rows[0].password_hash))
     ) {
       return res.status(401).json({
         success: false,
-        message: "Incorrect login details."
+        message: "Incorrect email/mobile number or password."
       });
     }
 
-    delete user.password_hash;
+    const user = result.rows[0];
 
     res.json({
       success: true,
       message: "Login successful.",
-      token: makeToken(user),
-      user
+      token: tokenFor(user),
+      user: formatUser(user)
     });
   } catch (err) {
     console.error("Login error:", err.message);
     res.status(500).json({
       success: false,
-      message: "Could not log in."
+      message: "Login failed."
     });
   }
 });
+
+function formatUser(user) {
+  return {
+    id: user.id,
+    accountNumber: user.account_number,
+    fullName: user.full_name,
+    mobile: user.mobile,
+    email: user.email,
+    mesBalance: Number(user.mes_balance),
+    kesBalance: Number(user.kes_balance),
+    createdAt: user.created_at
+  };
+}
 
 // PROFILE
 app.get("/api/profile", authenticate, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, full_name, phone, email, account_number,
-              mes_balance, cash_balance, created_at
+      `SELECT id, account_number, full_name, mobile, email,
+              mes_balance, kes_balance, created_at
        FROM users WHERE id = $1`,
-      [req.userId]
+      [req.auth.id]
     );
 
-    if (!result.rowCount) {
+    if (!result.rows.length) {
       return res.status(404).json({
         success: false,
         message: "Account not found."
       });
     }
 
-    res.json({ success: true, user: result.rows[0] });
+    res.json({
+      success: true,
+      user: formatUser(result.rows[0])
+    });
   } catch (err) {
     console.error("Profile error:", err.message);
     res.status(500).json({
       success: false,
-      message: "Could not load profile."
+      message: "Could not load your profile."
     });
   }
 });
 
-// BUY MES from the market pool.
-// Amount means the number of MES the user wants to receive.
-// Cost is calculated from pool reserves, not a fixed price.
-app.post("/api/buy", authenticate, async (req, res) => {
-  const amount = amountValue(req.body.amount);
+// CURRENT MARKET PRICE
+app.get("/api/market", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT price, updated_at FROM market WHERE id = 1"
+    );
 
+    res.json({
+      success: true,
+      currency: "KES",
+      price: Number(result.rows[0].price),
+      updatedAt: result.rows[0].updated_at
+    });
+  } catch (err) {
+    console.error("Market error:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not load market price."
+    });
+  }
+});
+
+// BUY MES
+app.post("/api/buy", authenticate, async (req, res) => {
+  const amount = positiveAmount(req.body.amount);
   if (!amount) {
     return res.status(400).json({
       success: false,
@@ -401,82 +366,56 @@ app.post("/api/buy", authenticate, async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Lock the pool so concurrent orders cannot overspend its supply.
-    const lockedMarket = await client.query(
-      "SELECT * FROM market_state WHERE id = 1 FOR UPDATE"
-    );
-
-    if (!lockedMarket.rowCount) throw new Error("MARKET_NOT_INITIALIZED");
-
-    const mesReserve = Number(lockedMarket.rows[0].mes_reserve);
-    const kesReserve = Number(lockedMarket.rows[0].kes_reserve);
-
-    if (amount >= mesReserve) {
-      await client.query("ROLLBACK");
-      return res.status(409).json({
-        success: false,
-        message: "Not enough MES in the market pool for this order.",
-        availableMES: mesReserve
-      });
-    }
-
-    // Constant-product pool: KES cost to remove amount MES.
-    const cost = money((kesReserve * amount) / (mesReserve - amount));
-
-    if (!Number.isFinite(cost) || cost <= 0) {
-      throw new Error("INVALID_TRADE_VALUE");
-    }
-
-    const lockedUser = await client.query(
+    const userResult = await client.query(
       "SELECT * FROM users WHERE id = $1 FOR UPDATE",
-      [req.userId]
+      [req.auth.id]
     );
+    if (!userResult.rows.length) throw new Error("ACCOUNT_NOT_FOUND");
 
-    const user = lockedUser.rows[0];
+    const marketResult = await client.query(
+      "SELECT price FROM market WHERE id = 1 FOR UPDATE"
+    );
+    let price = Number(marketResult.rows[0].price);
+    const total = Math.round(amount * price * 100) / 100;
+    const user = userResult.rows[0];
 
-    if (!user) throw new Error("ACCOUNT_NOT_FOUND");
-
-    if (Number(user.cash_balance) < cost) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient cash balance. No trade was made.",
-        requiredKES: cost,
-        cashBalanceKES: Number(user.cash_balance)
-      });
+    if (Number(user.kes_balance) < total) {
+      throw new Error("INSUFFICIENT_KES");
     }
 
-    const newMesReserve = mesReserve - amount;
-    const newKesReserve = kesReserve + cost;
+    // A buy increases the price. Balances and price update atomically.
+    const newPrice = Math.max(
+      MIN_PRICE,
+      Math.round(price * (1 + amount * PRICE_IMPACT) * 100000000) / 100000000
+    );
 
     await client.query(
       `UPDATE users
-       SET cash_balance = cash_balance - $1,
+       SET kes_balance = kes_balance - $1,
            mes_balance = mes_balance + $2
        WHERE id = $3`,
-      [cost, amount, req.userId]
+      [total, amount, req.auth.id]
     );
 
     await client.query(
-      `UPDATE market_state
-       SET mes_reserve = $1, kes_reserve = $2, updated_at = NOW()
-       WHERE id = 1`,
-      [newMesReserve, newKesReserve]
+      "UPDATE market SET price = $1, updated_at = NOW() WHERE id = 1",
+      [newPrice]
     );
+
+    const reference = "BUY-" + crypto.randomUUID();
 
     await client.query(
       `INSERT INTO transactions
-       (from_user_id, to_user_id, type, amount, price, total)
-       VALUES ($1, $1, 'buy', $2, $3, $4)`,
-      [req.userId, amount, cost / amount, cost]
+       (to_user_id, type, amount, price, total_kes, reference)
+       VALUES ($1, 'BUY', $2, $3, $4, $5)`,
+      [req.auth.id, amount, price, total, reference]
     );
 
-    const newPrice = newKesReserve / newMesReserve;
-
-    const updatedUser = await client.query(
-      `SELECT account_number, mes_balance, cash_balance
+    const updated = await client.query(
+      `SELECT id, account_number, full_name, mobile, email,
+              mes_balance, kes_balance, created_at
        FROM users WHERE id = $1`,
-      [req.userId]
+      [req.auth.id]
     );
 
     await client.query("COMMIT");
@@ -485,29 +424,37 @@ app.post("/api/buy", authenticate, async (req, res) => {
       success: true,
       message: "Buy completed.",
       amountMES: amount,
-      costKES: cost,
-      averagePriceKES: cost / amount,
-      marketPriceKES: newPrice,
-      availableMES: newMesReserve,
-      user: updatedUser.rows[0]
+      priceKES: price,
+      totalKES: total,
+      newMarketPriceKES: newPrice,
+      reference,
+      user: formatUser(updated.rows[0])
     });
   } catch (err) {
     await client.query("ROLLBACK");
+    const errors = {
+      ACCOUNT_NOT_FOUND: [404, "Account not found."],
+      INSUFFICIENT_KES: [400, "Insufficient KES balance."]
+    };
+    if (errors[err.message]) {
+      return res.status(errors[err.message][0]).json({
+        success: false,
+        message: errors[err.message][1]
+      });
+    }
     console.error("Buy error:", err.message);
     res.status(500).json({
       success: false,
-      message: "Buy order could not be completed."
+      message: "Buy could not be completed."
     });
   } finally {
     client.release();
   }
 });
 
-// SELL MES back to the market pool.
-// The more MES sold into the pool, the lower its price can move.
+// SELL MES
 app.post("/api/sell", authenticate, async (req, res) => {
-  const amount = amountValue(req.body.amount);
-
+  const amount = positiveAmount(req.body.amount);
   if (!amount) {
     return res.status(400).json({
       success: false,
@@ -520,117 +467,102 @@ app.post("/api/sell", authenticate, async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const lockedMarket = await client.query(
-      "SELECT * FROM market_state WHERE id = 1 FOR UPDATE"
-    );
-
-    if (!lockedMarket.rowCount) throw new Error("MARKET_NOT_INITIALIZED");
-
-    const mesReserve = Number(lockedMarket.rows[0].mes_reserve);
-    const kesReserve = Number(lockedMarket.rows[0].kes_reserve);
-
-    // Constant-product pool: KES paid out for amount MES added.
-    const proceeds = money((kesReserve * amount) / (mesReserve + amount));
-
-    const lockedUser = await client.query(
+    const userResult = await client.query(
       "SELECT * FROM users WHERE id = $1 FOR UPDATE",
-      [req.userId]
+      [req.auth.id]
     );
+    if (!userResult.rows.length) throw new Error("ACCOUNT_NOT_FOUND");
 
-    const user = lockedUser.rows[0];
-
-    if (!user) throw new Error("ACCOUNT_NOT_FOUND");
+    const marketResult = await client.query(
+      "SELECT price FROM market WHERE id = 1 FOR UPDATE"
+    );
+    const price = Number(marketResult.rows[0].price);
+    const total = Math.round(amount * price * 100) / 100;
+    const user = userResult.rows[0];
 
     if (Number(user.mes_balance) < amount) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient MES balance. No sale was made."
-      });
+      throw new Error("INSUFFICIENT_MES");
     }
 
-    if (proceeds > kesReserve) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        success: false,
-        message: "The market pool cannot cover this sale."
-      });
-    }
-
-    const newMesReserve = mesReserve + amount;
-    const newKesReserve = kesReserve - proceeds;
-
-    if (newKesReserve <= 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient market liquidity."
-      });
-    }
+    const newPrice = Math.max(
+      MIN_PRICE,
+      Math.round(price * (1 - amount * PRICE_IMPACT) * 100000000) / 100000000
+    );
 
     await client.query(
       `UPDATE users
        SET mes_balance = mes_balance - $1,
-           cash_balance = cash_balance + $2
+           kes_balance = kes_balance + $2
        WHERE id = $3`,
-      [amount, proceeds, req.userId]
+      [amount, total, req.auth.id]
     );
 
     await client.query(
-      `UPDATE market_state
-       SET mes_reserve = $1, kes_reserve = $2, updated_at = NOW()
-       WHERE id = 1`,
-      [newMesReserve, newKesReserve]
+      "UPDATE market SET price = $1, updated_at = NOW() WHERE id = 1",
+      [newPrice]
     );
+
+    const reference = "SELL-" + crypto.randomUUID();
 
     await client.query(
       `INSERT INTO transactions
-       (from_user_id, to_user_id, type, amount, price, total)
-       VALUES ($1, $1, 'sell', $2, $3, $4)`,
-      [req.userId, amount, proceeds / amount, proceeds]
+       (from_user_id, type, amount, price, total_kes, reference)
+       VALUES ($1, 'SELL', $2, $3, $4, $5)`,
+      [req.auth.id, amount, price, total, reference]
     );
 
-    const newPrice = newKesReserve / newMesReserve;
-
-    const updatedUser = await client.query(
-      `SELECT account_number, mes_balance, cash_balance
+    const updated = await client.query(
+      `SELECT id, account_number, full_name, mobile, email,
+              mes_balance, kes_balance, created_at
        FROM users WHERE id = $1`,
-      [req.userId]
+      [req.auth.id]
     );
 
     await client.query("COMMIT");
 
     res.json({
       success: true,
-      message: "Sale completed in the market pool.",
+      message: "Sell completed.",
       amountMES: amount,
-      receivedKES: proceeds,
-      averagePriceKES: proceeds / amount,
-      marketPriceKES: newPrice,
-      availableMES: newMesReserve,
-      user: updatedUser.rows[0]
+      priceKES: price,
+      totalKES: total,
+      newMarketPriceKES: newPrice,
+      reference,
+      user: formatUser(updated.rows[0])
     });
   } catch (err) {
     await client.query("ROLLBACK");
+    const errors = {
+      ACCOUNT_NOT_FOUND: [404, "Account not found."],
+      INSUFFICIENT_MES: [400, "Insufficient MES balance."]
+    };
+    if (errors[err.message]) {
+      return res.status(errors[err.message][0]).json({
+        success: false,
+        message: errors[err.message][1]
+      });
+    }
     console.error("Sell error:", err.message);
     res.status(500).json({
       success: false,
-      message: "Sell order could not be completed."
+      message: "Sell could not be completed."
     });
   } finally {
     client.release();
   }
 });
 
-// SEND MES to another user's account number.
-app.post("/api/send", authenticate, async (req, res) => {
-  const accountNumber = String(req.body.accountNumber || "").trim();
-  const amount = amountValue(req.body.amount);
+// SEND MES TO ANOTHER ACCOUNT
+app.post("/api/transfer", authenticate, async (req, res) => {
+  const amount = positiveAmount(req.body.amount);
+  const recipientAccount = String(
+    req.body.accountNumber || req.body.recipientAccount || ""
+  ).trim().toUpperCase();
 
-  if (!accountNumber || !amount) {
+  if (!amount || !recipientAccount) {
     return res.status(400).json({
       success: false,
-      message: "Enter recipient account number and a valid amount."
+      message: "Enter the recipient account number and a valid amount."
     });
   }
 
@@ -639,35 +571,24 @@ app.post("/api/send", authenticate, async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    const senderResult = await client.query(
+      "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+      [req.auth.id]
+    );
+    if (!senderResult.rows.length) throw new Error("ACCOUNT_NOT_FOUND");
+
     const recipientResult = await client.query(
-      "SELECT id, account_number FROM users WHERE account_number = $1",
-      [accountNumber]
+      "SELECT * FROM users WHERE account_number = $1 FOR UPDATE",
+      [recipientAccount]
     );
 
+    if (!recipientResult.rows.length) throw new Error("RECIPIENT_NOT_FOUND");
+    const sender = senderResult.rows[0];
     const recipient = recipientResult.rows[0];
 
-    if (!recipient) throw new Error("RECIPIENT_NOT_FOUND");
-
-    if (String(recipient.id) === String(req.userId)) {
+    if (String(sender.id) === String(recipient.id)) {
       throw new Error("CANNOT_SEND_TO_SELF");
     }
-
-    const ids = [String(req.userId), String(recipient.id)].sort(
-      (a, b) => (BigInt(a) < BigInt(b) ? -1 : 1)
-    );
-
-    const locked = await client.query(
-      `SELECT id, mes_balance FROM users
-       WHERE id = ANY($1::bigint[])
-       ORDER BY id FOR UPDATE`,
-      [ids]
-    );
-
-    const sender = locked.rows.find(
-      row => String(row.id) === String(req.userId)
-    );
-
-    if (!sender) throw new Error("ACCOUNT_NOT_FOUND");
 
     if (Number(sender.mes_balance) < amount) {
       throw new Error("INSUFFICIENT_BALANCE");
@@ -675,25 +596,31 @@ app.post("/api/send", authenticate, async (req, res) => {
 
     await client.query(
       "UPDATE users SET mes_balance = mes_balance - $1 WHERE id = $2",
-      [amount, req.userId]
+      [amount, sender.id]
     );
-
     await client.query(
       "UPDATE users SET mes_balance = mes_balance + $1 WHERE id = $2",
       [amount, recipient.id]
     );
 
+    const reference = "SEND-" + crypto.randomUUID();
+    const marketResult = await client.query(
+      "SELECT price FROM market WHERE id = 1"
+    );
+    const price = Number(marketResult.rows[0].price);
+
     await client.query(
       `INSERT INTO transactions
-       (from_user_id, to_user_id, type, amount, price, total)
-       VALUES ($1, $2, 'send', $3, 0, 0)`,
-      [req.userId, recipient.id, amount]
+       (from_user_id, to_user_id, type, amount, price, total_kes, reference)
+       VALUES ($1, $2, 'TRANSFER', $3, $4, $5, $6)`,
+      [sender.id, recipient.id, amount, price, amount * price, reference]
     );
 
     const updated = await client.query(
-      `SELECT account_number, mes_balance
+      `SELECT id, account_number, full_name, mobile, email,
+              mes_balance, kes_balance, created_at
        FROM users WHERE id = $1`,
-      [req.userId]
+      [sender.id]
     );
 
     await client.query("COMMIT");
@@ -702,17 +629,18 @@ app.post("/api/send", authenticate, async (req, res) => {
       success: true,
       message: "MesCoin transfer completed.",
       amountMES: amount,
-      recipientAccount: accountNumber,
-      user: updated.rows[0]
+      recipientAccount,
+      reference,
+      user: formatUser(updated.rows[0])
     });
   } catch (err) {
     await client.query("ROLLBACK");
 
     const errors = {
+      ACCOUNT_NOT_FOUND: [404, "Your account was not found."],
       RECIPIENT_NOT_FOUND: [404, "Recipient account was not found."],
-      CANNOT_SEND_TO_SELF: [400, "You cannot send to your own account."],
-      INSUFFICIENT_BALANCE: [400, "Insufficient MES balance."],
-      ACCOUNT_NOT_FOUND: [404, "Your account was not found."]
+      CANNOT_SEND_TO_SELF: [400, "You cannot send MES to yourself."],
+      INSUFFICIENT_BALANCE: [400, "Insufficient MES balance."]
     };
 
     if (errors[err.message]) {
@@ -732,15 +660,65 @@ app.post("/api/send", authenticate, async (req, res) => {
   }
 });
 
-// Logged-in user's recent transaction history.
+// TRANSACTION HISTORY
 app.get("/api/transactions", authenticate, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT t.id, t.type, t.amount, t.price, t.total, t.created_at,
+      `SELECT t.id, t.type, t.amount, t.price, t.total_kes,
+              t.reference, t.created_at,
               sender.account_number AS sender_account,
               recipient.account_number AS recipient_account
        FROM transactions t
        LEFT JOIN users sender ON sender.id = t.from_user_id
        LEFT JOIN users recipient ON recipient.id = t.to_user_id
        WHERE t.from_user_id = $1 OR t.to_user_id = $1
-       ORDER BY t.created_at D
+       ORDER BY t.created_at DESC
+       LIMIT 100`,
+      [req.auth.id]
+    );
+
+    res.json({
+      success: true,
+      transactions: result.rows.map(t => ({
+        id: t.id,
+        type: t.type,
+        amountMES: Number(t.amount),
+        priceKES: Number(t.price),
+        totalKES: Number(t.total_kes),
+        reference: t.reference,
+        senderAccount: t.sender_account,
+        recipientAccount: t.recipient_account,
+        createdAt: t.created_at
+      }))
+    });
+  } catch (err) {
+    console.error("Transactions error:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Could not load transaction history."
+    });
+  }
+});
+
+// Handle unexpected errors without exposing secrets.
+app.use((err, req, res, next) => {
+  console.error("Request error:", err.message);
+  if (res.headersSent) return next(err);
+  res.status(500).json({
+    success: false,
+    message: "An unexpected server error occurred."
+  });
+});
+
+async function startServer() {
+  await initializeDatabase();
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`MesCoin server listening on port ${PORT}`);
+  });
+}
+
+startServer().catch(err => {
+  console.error("SERVER STARTUP FAILED:", err.message);
+  process.exit(1);
+});
