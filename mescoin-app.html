@@ -1,189 +1,226 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>MesCoin</title>
-
+<title>MesCoin Exchange - Official App</title>
 <style>
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #080e1d;
-    color: white;
-}
-
-header {
-    background: #111a33;
-    text-align: center;
-    padding: 25px 15px;
-    border-bottom: 1px solid #26345b;
-}
-
-header h1 {
-    margin: 0 0 12px;
-    color: #55d6ff;
-    font-size: 30px;
-}
-
-.status {
-    display: inline-block;
-    padding: 9px 18px;
-    border-radius: 20px;
-    font-size: 14px;
-}
-
-.checking {
-    background: #403518;
-    color: #ffd66b;
-}
-
-.online {
-    background: #123d2a;
-    color: #62e6a5;
-}
-
-.offline {
-    background: #4a1720;
-    color: #ff9aa4;
-}
-
-.container {
-    width: 100%;
-    max-width: 650px;
-    margin: auto;
-    padding: 22px;
-}
-
-.card {
-    background: #121b35;
-    border: 1px solid #26345b;
-    border-radius: 18px;
-    padding: 26px;
-    margin-bottom: 22px;
-}
-
-h2 {
-    color: #55d6ff;
-    margin-top: 0;
-}
-
-input,
-select {
-    width: 100%;
-    padding: 16px;
-    margin: 8px 0;
-    border-radius: 13px;
-    border: 1px solid #30416d;
-    background: #080f25;
-    color: white;
-    font-size: 16px;
-    outline: none;
-}
-
-button {
-    width: 100%;
-    padding: 16px;
-    margin-top: 12px;
-    border: none;
-    border-radius: 13px;
-    color: white;
-    font-size: 16px;
-    font-weight: bold;
-    cursor: pointer;
-}
-
-.blue {
-    background: #1677ff;
-}
-
-.green {
-    background: #159447;
-}
-
-.red {
-    background: #d83248;
-}
-
-.gray {
-    background: #394463;
-}
-
-.hidden {
-    display: none !important;
-}
-
-.message {
-    margin-top: 12px;
-    padding: 12px;
-    border-radius: 10px;
-    background: #18233f;
-    color: #b9c8e8;
-    text-align: center;
-}
-
-.stat {
-    background: #0c142b;
-    border: 1px solid #26345b;
-    padding: 18px;
-    border-radius: 14px;
-    margin: 10px 0;
-}
-
-.stat-title {
-    color: #91a0c4;
-    font-size: 14px;
-}
-
-.stat-value {
-    font-size: 25px;
-    font-weight: bold;
-    margin-top: 7px;
-}
-
-.price {
-    color: #55d6ff;
-}
-
-.row {
-    display: flex;
-    gap: 10px;
-}
-
-.row button {
-    flex: 1;
-}
-
-.order {
-    background: #0c142b;
-    border: 1px solid #26345b;
-    border-radius: 12px;
-    padding: 15px;
-    margin-top: 10px;
-}
-
-.small {
-    color: #91a0c4;
-    font-size: 13px;
-}
-
-hr {
-    border: none;
-    border-top: 1px solid #26345b;
-    margin: 22px 0;
-}
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#050505;color:#fff;min-height:100vh}
+header{background:#111;padding:15px;text-align:center;border-bottom:2px solid #ffcc00;position:sticky;top:0;z-index:10}
+header h1{color:#ffcc00;letter-spacing:2px}
+.price-bar{background:#1a1a1a;padding:12px;text-align:center;border-bottom:1px solid #333}
+.price-bar span{color:#00ff88;font-size:26px;font-weight:bold}
+.card{background:#141414;border:1px solid #2a2a2a;border-radius:16px;padding:16px;margin:12px auto;max-width:480px}
+.card h3{color:#ffcc00;margin-bottom:10px}
+input{width:100%;padding:14px;margin:7px 0;background:#0f0f0f;border:1px solid #333;border-radius:10px;color:#fff;font-size:16px}
+button{width:100%;padding:14px;margin:7px 0;border:none;border-radius:10px;font-weight:bold;font-size:16px;cursor:pointer}
+.btn-yellow{background:#ffcc00;color:#000}
+.btn-outline{background:transparent;border:1px solid #ffcc00;color:#ffcc00}
+.flex{display:flex;gap:8px}
+.small{font-size:12px;color:#888}
+.hidden{display:none}
+.badge{display:inline-block;background:#222;border:1px solid #ffcc00;color:#ffcc00;padding:4px 10px;border-radius:20px;font-size:12px}
+.order-row{background:#0f0f0f;padding:10px;border-radius:10px;margin:6px 0;display:flex;justify-content:space-between;border-left:4px solid #ffcc00}
+.buy-border{border-left-color:#00ff88}
+.sell-border{border-left-color:#ff4444}
+.tabs{display:flex;gap:8px;margin:10px auto;max-width:480px}
+.tabs button{flex:1}
+.active-tab{background:#ffcc00 !important;color:#000 !important}
 </style>
 </head>
-
 <body>
 
 <header>
+  <h1>MESCOIN</h1>
+  <div class="small">MES / KES Exchange - Price starts at 2 KES</div>
+</header>
 
-    <h1>MesCoin</h1>
+<div class="price-bar">
+  Live Price: <span id="livePrice">2.0000</span> KES / MES <span id="priceChange" class="badge">+0%</span>
+  <div class="small">Price goes UP when buy orders > sell orders</div>
+</div>
 
-    <div id="
+<!-- AUTH -->
+<div id="authSection" class="card">
+  <h3>Create Account / Login</h3>
+  <input id="email" type="email" placeholder="Email (e.g. john@gmail.com)">
+  <input id="phone" type="tel" placeholder="Phone (e.g. 0712345678)">
+  <input id="password" type="password" placeholder="Password (min 6 chars)">
+  <div class="flex">
+    <button class="btn-yellow" onclick="signup()">Sign Up</button>
+    <button class="btn-outline" onclick="login()">Login</button>
+  </div>
+  <p id="authMsg" class="small"></p>
+  <p class="small" style="margin-top:10px">When you sign up, server creates MesCoin account automatically: MESxxxxxxx. Saved in Postgres.</p>
+</div>
+
+<!-- APP -->
+<div id="appSection" class="hidden">
+  <div class="card">
+    <h3>My Profile</h3>
+    <div>Mes Account: <b id="mesAcc" style="color:#ffcc00"></b> <button style="width:auto;padding:4px 8px;font-size:12px" onclick="copyAcc()">Copy</button></div>
+    <div style="margin-top:8px">Email: <span id="uEmail"></span><br>Phone: <span id="uPhone"></span></div>
+    <div class="flex" style="margin-top:12px">
+      <div style="flex:1;background:#0f0f0f;padding:10px;border-radius:10px;text-align:center">KES<br><b id="kesBal" style="color:#00ff88">0</b></div>
+      <div style="flex:1;background:#0f0f0f;padding:10px;border-radius:10px;text-align:center">MES<br><b id="mesBal" style="color:#ffcc00">0</b></div>
+    </div>
+    <button class="btn-outline" onclick="logout()" style="margin-top:10px">Logout</button>
+  </div>
+
+  <div class="tabs">
+    <button id="tabBuy" class="btn-yellow active-tab" onclick="switchTab('buy')">BUY</button>
+    <button id="tabSell" class="btn-outline" onclick="switchTab('sell')">SELL</button>
+  </div>
+
+  <div id="buyCard" class="card">
+    <h3>Buy MES</h3>
+    <input id="buyAmt" type="number" placeholder="Amount MES you want (e.g. 100)">
+    <input id="buyPrice" type="number" placeholder="Price per MES (e.g. 2.1)">
+    <div class="small">Total KES needed: <span id="buyTotal">0</span></div>
+    <button class="btn-yellow" onclick="placeBuy()">Place Buy Order</button>
+    <div class="small">Server will match you automatically with sellers. If no sellers, price will increase.</div>
+  </div>
+
+  <div id="sellCard" class="card hidden">
+    <h3>Sell MES</h3>
+    <input id="sellAmt" type="number" placeholder="Amount MES to sell">
+    <input id="sellPrice" type="number" placeholder="Price per MES (e.g. 2.5)">
+    <div class="small">You will receive: <span id="sellTotal">0</span> KES</div>
+    <button class="btn-yellow" onclick="placeSell()">Place Sell Order</button>
+    <div class="small">Put your MesCoin account: <b id="sellAcc"></b> in receiver if sending externally</div>
+  </div>
+
+  <div class="card">
+    <h3>Market - Open Orders</h3>
+    <button class="btn-outline" onclick="loadMarket()" style="padding:8px">Refresh Market</button>
+    <div id="marketList" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h3>My Orders</h3>
+    <div id="myOrdersList"></div>
+  </div>
+</div>
+
+<script>
+// YOUR SERVER - CONNECTS TO RENDER + POSTGRES
+const API = 'https://mescoin-1.onrender.com';
+let token = localStorage.getItem('mes_token');
+let currentPrice = 2.0;
+
+function $(id){return document.getElementById(id)}
+
+if(token){ showApp(); }
+
+// Auto calc totals
+$('buyAmt').addEventListener('input', ()=>{ $('buyTotal').innerText = (parseFloat($('buyAmt').value||0)*parseFloat($('buyPrice').value||0)).toFixed(2)+' KES'; });
+$('buyPrice').addEventListener('input', ()=>{ $('buyTotal').innerText = (parseFloat($('buyAmt').value||0)*parseFloat($('buyPrice').value||0)).toFixed(2)+' KES'; });
+$('sellAmt').addEventListener('input', ()=>{ $('sellTotal').innerText = (parseFloat($('sellAmt').value||0)*parseFloat($('sellPrice').value||0)).toFixed(2)+' KES'; });
+$('sellPrice').addEventListener('input', ()=>{ $('sellTotal').innerText = (parseFloat($('sellAmt').value||0)*parseFloat($('sellPrice').value||0)).toFixed(2)+' KES'; });
+
+function switchTab(t){
+  if(t==='buy'){ $('buyCard').classList.remove('hidden'); $('sellCard').classList.add('hidden'); $('tabBuy').classList.add('active-tab'); $('tabSell').classList.remove('active-tab'); }
+  else { $('sellCard').classList.remove('hidden'); $('buyCard').classList.add('hidden'); $('tabSell').classList.add('active-tab'); $('tabBuy').classList.remove('active-tab'); }
+}
+
+async function signup(){
+  $('authMsg').innerText='Creating account...';
+  try{
+    const res = await fetch(API+'/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value,phone:$('phone').value,password:$('password').value})});
+    const d = await res.json();
+    if(d.token){ localStorage.setItem('mes_token',d.token); token=d.token; $('authMsg').innerText='Account created! MES: '+d.mesAccount; showApp(); }
+    else $('authMsg').innerText=d.error;
+  }catch(e){ $('authMsg').innerText='Server waking up... wait 30s and try again'; }
+}
+
+async function login(){
+  $('authMsg').innerText='Logging in...';
+  try{
+    const res = await fetch(API+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value,password:$('password').value})});
+    const d = await res.json();
+    if(d.token){ localStorage.setItem('mes_token',d.token); token=d.token; showApp(); }
+    else $('authMsg').innerText=d.error;
+  }catch(e){ $('authMsg').innerText='Server waking up... wait 30s'; }
+}
+
+function logout(){ localStorage.removeItem('mes_token'); location.reload(); }
+
+async function showApp(){
+  $('authSection').classList.add('hidden');
+  $('appSection').classList.remove('hidden');
+  await loadProfile();
+  await loadPrice();
+  await loadMarket();
+  await loadMyOrders();
+  setInterval(loadPrice, 5000);
+}
+
+async function loadProfile(){
+  const res = await fetch(API+'/api/profile',{headers:{Authorization:'Bearer '+token}});
+  const u = await res.json();
+  if(u.email){
+    $('uEmail').innerText=u.email; $('uPhone').innerText=u.phone;
+    $('mesAcc').innerText=u.mes_account; $('sellAcc').innerText=u.mes_account;
+    $('kesBal').innerText=parseFloat(u.kes_balance).toFixed(2);
+    $('mesBal').innerText=parseFloat(u.mes_balance).toFixed(4);
+  }
+}
+
+async function loadPrice(){
+  try{
+    const res = await fetch(API+'/api/price');
+    const d = await res.json();
+    const newPrice = parseFloat(d.price);
+    if(newPrice > currentPrice) $('priceChange').innerText = '+' + ((newPrice-currentPrice)/currentPrice*100).toFixed(2)+'%';
+    currentPrice = newPrice;
+    $('livePrice').innerText = currentPrice.toFixed(4);
+    $('buyPrice').placeholder = currentPrice.toFixed(4);
+    $('sellPrice').placeholder = (currentPrice*1.05).toFixed(4);
+  }catch(e){}
+}
+
+async function placeBuy(){
+  const amount = parseFloat($('buyAmt').value);
+  const price = parseFloat($('buyPrice').value);
+  if(!amount||!price) return alert('Enter amount and price');
+  const res = await fetch(API+'/api/buy',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount,price})});
+  const d = await res.json();
+  alert(d.message || d.error);
+  loadProfile(); loadMarket(); loadMyOrders(); loadPrice();
+}
+
+async function placeSell(){
+  const amount = parseFloat($('sellAmt').value);
+  const price = parseFloat($('sellPrice').value);
+  if(!amount||!price) return alert('Enter amount and price');
+  const res = await fetch(API+'/api/sell',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount,price})});
+  const d = await res.json();
+  alert(d.message || d.error);
+  loadProfile(); loadMarket(); loadMyOrders();
+}
+
+async function loadMarket(){
+  const res = await fetch(API+'/api/orders');
+  const orders = await res.json();
+  $('marketList').innerHTML = orders.length? orders.map(o=>`
+    <div class="order-row ${o.type==='buy'?'buy-border':'sell-border'}">
+      <span><b>${o.type.toUpperCase()}</b> ${parseFloat(o.amount).toFixed(2)} MES</span>
+      <span>@ ${parseFloat(o.price).toFixed(4)} KES</span>
+    </div>`).join('') : '<div class="small">No open orders - you are first!</div>';
+}
+
+async function loadMyOrders(){
+  const res = await fetch(API+'/api/myorders',{headers:{Authorization:'Bearer '+token}});
+  const orders = await res.json();
+  $('myOrdersList').innerHTML = orders.length? orders.map(o=>`
+    <div class="order-row">
+      <span>${o.type} ${parseFloat(o.amount).toFixed(2)} @ ${parseFloat(o.price).toFixed(4)}</span>
+      <span class="badge">${o.status}</span>
+    </div>`).join('') : '<div class="small">No orders yet</div>';
+}
+
+function copyAcc(){ navigator.clipboard.writeText($('mesAcc').innerText); alert('Mes account copied: '+$('mesAcc').innerText); }
+</script>
+</body>
+    </html>
