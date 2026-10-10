@@ -1,13 +1,14 @@
+
 {
   "name": "mescoin-server",
-  "version": "2.0.0",
-  "description": "MesCoin account, portfolio, and transfer API",
+  "version": "1.0.0",
+  "description": "MesCoin trading API with PostgreSQL",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -17,3 +18,4 @@
     "pg": "^8.13.1"
   }
 }
+
