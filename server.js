@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
@@ -9,7 +8,6 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const SECRET = process.env.JWT_SECRET || "mescoin-secret-2026";
 
-// YOUR DATABASE - uses env variable
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -17,184 +15,87 @@ const pool = new Pool({
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
-// CREATE TABLES
-async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      phone TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      mes_account TEXT UNIQUE NOT NULL,
-      kes_balance DECIMAL DEFAULT 10000,
-      mes_balance DECIMAL DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS orders (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER REFERENCES users(id),
-      type TEXT NOT NULL,
-      amount DECIMAL NOT NULL,
-      price DECIMAL NOT NULL,
-      status TEXT DEFAULT 'open',
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS price_table (
-      id INTEGER PRIMARY KEY,
-      current_price DECIMAL DEFAULT 2.0
-    );
-    INSERT INTO price_table (id, current_price) VALUES (1, 2.0) ON CONFLICT (id) DO NOTHING;
-  `);
-  console.log("Postgres connected & tables ready");
-}
-initDB();
+pool.query(`
+  CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email TEXT UNIQUE,
+    phone TEXT UNIQUE,
+    password TEXT,
+    mes_account TEXT UNIQUE,
+    kes_balance DECIMAL DEFAULT 0,
+    mes_balance DECIMAL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS price_table (id INTEGER PRIMARY KEY, current_price DECIMAL DEFAULT 2.0);
+  INSERT INTO price_table (id, current_price) VALUES (1, 2.0) ON CONFLICT (id) DO NOTHING;
+`).then(()=>console.log("Postgres connected & tables ready")).catch(e=>console.log(e.message));
 
-function auth(req, res, next) {
-  const token = req.headers['authorization'];
-  if (!token) return res.status(401).json({error: "No token"});
-  try {
-    const decoded = jwt.verify(token.replace('Bearer ',''), SECRET);
-    req.user = decoded;
-    next();
-  } catch(e){ res.status(401).json({error: "Invalid token"}) }
+function auth(req,res,next){
+  const token = req.headers.authorization?.split(' ')[1];
+  if(!token) return res.status(401).json({error:"No token"});
+  try{ req.user = jwt.verify(token, SECRET); next(); } catch{ return res.status(401).json({error:"Invalid token"}); }
 }
 
-// SIGNUP - email phone password -> creates mes account
-app.post('/api/signup', async (req, res) => {
-  const { email, phone, password } = req.body;
-  if(!email ||!phone ||!password) return res.status(400).json({error:"All fields required"});
-  try {
+app.get('/api/price', async (req,res)=>{
+  const r = await pool.query('SELECT current_price FROM price_table WHERE id=1');
+  res.json({price: parseFloat(r.rows[0].current_price)});
+});
+
+app.post('/api/signup', async (req,res)=>{
+  const {email, phone, password} = req.body;
+  if(!email ||!password) return res.status(400).json({error:"Email and password required"});
+  try{
     const hash = await bcrypt.hash(password, 10);
-    const mesAccount = "MES" + Date.now().toString().slice(-8) + Math.floor(Math.random()*9000+1000);
+    const mesAcc = "MES" + Math.floor(100000 + Math.random()*900000);
     const result = await pool.query(
-      `INSERT INTO users (email, phone, password, mes_account) VALUES ($1,$2,$3,$4) RETURNING id`,
-      [email, phone, hash, mesAccount]
+      'INSERT INTO users(email, phone, password, mes_account) VALUES($1,$2,$3,$4) RETURNING id, email, mes_account, kes_balance, mes_balance',
+      [email, phone, hash, mesAcc]
     );
-    const token = jwt.sign({id: result.rows[0].id, email}, SECRET);
-    res.json({token, mesAccount, message:"Account created successfully"});
-  } catch(err) {
-    res.status(400).json({error:"Email or phone already exists"});
+    const token = jwt.sign({id: result.rows[0].id}, SECRET);
+    res.json({token, user: result.rows[0]});
+  } catch(e){
+    res.status(400).json({error: e.detail || "Email or phone already exists"});
   }
 });
 
-// LOGIN
-app.post('/api/login', async (req, res) => {
-  const { email, password } = req.body;
-  const result = await pool.query(`SELECT * FROM users WHERE email=$1`, [email]);
-  if(result.rows.length === 0) return res.status(400).json({error:"User not found"});
-  const user = result.rows[0];
-  const ok = await bcrypt.compare(password, user.password);
+app.post('/api/login', async (req,res)=>{
+  const {email, password} = req.body;
+  const r = await pool.query('SELECT * FROM users WHERE email=$1', [email]);
+  if(r.rows.length===0) return res.status(400).json({error:"User not found"});
+  const ok = await bcrypt.compare(password, r.rows[0].password);
   if(!ok) return res.status(400).json({error:"Wrong password"});
-  const token = jwt.sign({id: user.id, email: user.email}, SECRET);
-  res.json({token, mesAccount: user.mes_account});
+  const token = jwt.sign({id: r.rows[0].id}, SECRET);
+  res.json({token, user: r.rows[0]});
 });
 
-// PROFILE
-app.get('/api/profile', auth, async (req, res) => {
-  const result = await pool.query(`SELECT id,email,phone,mes_account,kes_balance,mes_balance FROM users WHERE id=$1`, [req.user.id]);
-  res.json(result.rows[0]);
+app.get('/api/me', auth, async (req,res)=>{
+  const r = await pool.query('SELECT id, email, phone, mes_account, kes_balance, mes_balance FROM users WHERE id=$1', [req.user.id]);
+  res.json(r.rows[0]);
 });
 
-// PRICE - starts at 2 KES
-app.get('/api/price', async (req, res) => {
-  const result = await pool.query(`SELECT current_price FROM price_table WHERE id=1`);
-  res.json({price: parseFloat(result.rows[0].current_price)});
-});
-
-// MATCHING ENGINE - price goes up when buy > sell
-async function matchOrders(newOrder) {
-  let priceRes = await pool.query(`SELECT current_price FROM price_table WHERE id=1`);
-  let currentPrice = parseFloat(priceRes.rows[0].current_price);
-
-  const oppositeType = newOrder.type === 'buy'? 'sell' : 'buy';
-  const query = oppositeType === 'sell'
-   ? `SELECT * FROM orders WHERE type='sell' AND status='open' AND price <= $1 ORDER BY price ASC, created_at ASC`
-    : `SELECT * FROM orders WHERE type='buy' AND status='open' AND price >= $1 ORDER BY price DESC, created_at ASC`;
-
-  const matches = await pool.query(query, [newOrder.price]);
-
-  if(matches.rows.length === 0){
-    if(newOrder.type === 'buy'){
-      const totalSellRes = await pool.query(`SELECT SUM(amount) as total FROM orders WHERE type='sell' AND status='open'`);
-      const totalSell = parseFloat(totalSellRes.rows[0].total || 0);
-      if(newOrder.amount > totalSell){
-        const increase = (newOrder.amount / 1000000) * 0.05;
-        currentPrice = currentPrice * (1 + increase);
-        await pool.query(`UPDATE price_table SET current_price=$1 WHERE id=1`, [currentPrice]);
-      }
-    }
-    return currentPrice;
-  }
-
-  let remaining = newOrder.amount;
-  for(let m of matches.rows){
-    if(remaining <=0) break;
-    const tradeAmount = Math.min(remaining, parseFloat(m.amount));
-    const tradePrice = parseFloat(m.price);
-
-    if(newOrder.type === 'buy'){
-      const cost = tradeAmount * tradePrice;
-      await pool.query(`UPDATE users SET kes_balance=kes_balance-$1, mes_balance=mes_balance+$2 WHERE id=$3`, [cost, tradeAmount, newOrder.user_id]);
-      await pool.query(`UPDATE users SET kes_balance=kes_balance+$1, mes_balance=mes_balance-$2 WHERE id=$3`, [cost, tradeAmount, m.user_id]);
-    } else {
-      const cost = tradeAmount * parseFloat(newOrder.price);
-      await pool.query(`UPDATE users SET kes_balance=kes_balance+$1, mes_balance=mes_balance-$2 WHERE id=$3`, [cost, tradeAmount, newOrder.user_id]);
-      await pool.query(`UPDATE users SET kes_balance=kes_balance-$1, mes_balance=mes_balance+$2 WHERE id=$3`, [cost, tradeAmount, m.user_id]);
-    }
-
-    remaining -= tradeAmount;
-    const newMAmount = parseFloat(m.amount) - tradeAmount;
-    if(newMAmount <= 0.00001){
-      await pool.query(`UPDATE orders SET status='completed' WHERE id=$1`, [m.id]);
-    } else {
-      await pool.query(`UPDATE orders SET amount=$1 WHERE id=$2`, [newMAmount, m.id]);
-    }
-  }
-
-  if(remaining > 0.00001){
-    await pool.query(`UPDATE orders SET amount=$1 WHERE id=$2`, [remaining, newOrder.id]);
+app.post('/api/trade', auth, async (req,res)=>{
+  const {type, amount} = req.body;
+  const priceR = await pool.query('SELECT current_price FROM price_table WHERE id=1');
+  const price = parseFloat(priceR.rows[0].current_price);
+  const userR = await pool.query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+  let user = userR.rows[0];
+  if(type==='buy'){
+    const cost = amount * price;
+    if(parseFloat(user.kes_balance) < cost) return res.status(400).json({error:"Not enough KES - need to deposit"});
+    await pool.query('UPDATE users SET kes_balance=kes_balance-$1, mes_balance=mes_balance+$2 WHERE id=$3', [cost, amount, req.user.id]);
   } else {
-    await pool.query(`UPDATE orders SET status='completed' WHERE id=$1`, [newOrder.id]);
+    if(parseFloat(user.mes_balance) < amount) return res.status(400).json({error:"Not enough MES"});
+    const gain = amount * price;
+    await pool.query('UPDATE users SET kes_balance=kes_balance+$1, mes_balance=mes_balance-$2 WHERE id=$3', [gain, amount, req.user.id]);
   }
-
-  if(newOrder.type === 'buy'){
-    currentPrice = currentPrice * 1.01;
-    await pool.query(`UPDATE price_table SET current_price=$1 WHERE id=1`, [currentPrice]);
-  }
-
-  return currentPrice;
-}
-
-// BUY
-app.post('/api/buy', auth, async (req, res) => {
-  const { amount, price } = req.body;
-  const result = await pool.query(`INSERT INTO orders (user_id, type, amount, price) VALUES ($1,'buy',$2,$3) RETURNING id`, [req.user.id, amount, price]);
-  const newPrice = await matchOrders({id: result.rows[0].id, user_id: req.user.id, type:'buy', amount, price});
-  res.json({message:"Buy order placed & matched", newPrice});
+  const updated = await pool.query('SELECT id, email, mes_account, kes_balance, mes_balance FROM users WHERE id=$1', [req.user.id]);
+  res.json({success:true, user: updated.rows[0], price});
 });
 
-// SELL
-app.post('/api/sell', auth, async (req, res) => {
-  const { amount, price } = req.body;
-  const userRes = await pool.query(`SELECT mes_balance FROM users WHERE id=$1`, [req.user.id]);
-  if(parseFloat(userRes.rows[0].mes_balance) < parseFloat(amount)) return res.status(400).json({error:"Not enough MES"});
-  const result = await pool.query(`INSERT INTO orders (user_id, type, amount, price) VALUES ($1,'sell',$2,$3) RETURNING id`, [req.user.id, amount, price]);
-  const newPrice = await matchOrders({id: result.rows[0].id, user_id: req.user.id, type:'sell', amount, price});
-  res.json({message:"Sell order placed & matched", newPrice});
+app.get('/', (req,res)=>{
+  res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>MESCOIN</title><style>body{font-family:sans-serif;max-width:400px;margin:auto;padding:20px;background:#f9fafb}input,button{width:100%;padding:12px;margin:6px 0;border-radius:8px;border:1px solid #ccc}button{background:#16a34a;color:#fff;border:none;font-weight:bold;font-size:16px;cursor:pointer}.card{background:#fff;padding:16px;border-radius:12px;margin:12px 0;box-shadow:0 2px 6px rgba(0,0,0,0.1)}</style></head><body><h1 style="color:#16a34a;text-align:center">MESCOIN</h1><div class="card">Price: <b id="price">Loading...</b> KES / MES</div><div id="auth" class="card"><input id="email" placeholder="Email"><input id="phone" placeholder="Phone"><input id="password" type="password" placeholder="Password"><button onclick="signup()">Sign Up</button><button onclick="login()" style="background:#111">Login</button></div><div id="dash" class="card" style="display:none"><p>Account: <b id="acc"></b></p><p>KES: <b id="kes"></b> | MES: <b id="mes"></b></p><input id="amt" type="number" placeholder="Amount of MES"><button onclick="trade('buy')">BUY MES</button><button onclick="trade('sell')" style="background:#dc2626">SELL MES</button><button onclick="logout()" style="background:#666">Logout</button></div><script>let token=null;async function loadPrice(){let r=await fetch('/api/price');let d=await r.json();document.getElementById('price').innerText=d.price}loadPrice();setInterval(loadPrice,5000);async function signup(){let r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.value,phone:phone.value,password:password.value})});let d=await r.json();if(d.error)return alert(d.error);token=d.token;showDash(d.user);}async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.value,password:password.value})});let d=await r.json();if(d.error)return alert(d.error);token=d.token;showDash(d.user);}function showDash(u){auth.style.display='none';dash.style.display='block';acc.innerText=u.mes_account;kes.innerText=u.kes_balance;mes.innerText=u.mes_balance}async function trade(type){let amount=parseFloat(document.getElementById('amt').value);if(!amount)return alert('Enter amount');let r=await fetch('/api/trade',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({type,amount})});let d=await r.json();if(d.error)return alert(d.error);alert('Success');kes.innerText=d.user.kes_balance;mes.innerText=d.user.mes_balance;}function logout(){token=null;auth.style.display='block';dash.style.display='none'}</script></body></html>`);
 });
 
-app.get('/api/orders', async (req,res)=>{
-  const r = await pool.query(`SELECT * FROM orders WHERE status='open' ORDER BY created_at DESC LIMIT 50`);
-  res.json(r.rows);
-});
-
-app.get('/api/myorders', auth, async (req,res)=>{
-  const r = await pool.query(`SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC`, [req.user.id]);
-  res.json(r.rows);
-});
-
-app.get('*', (req,res)=> res.sendFile(path.join(__dirname, 'public', 'index.html')));
-
-app.listen(PORT, '0.0.0.0', ()=> console.log(`MesCoin running on ${PORT} with Postgres`));
+console.log("MesCoin running on "+PORT+" with Postgres");
+app.listen(PORT,'0.0.0.0');
