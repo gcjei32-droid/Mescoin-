@@ -1,226 +1,113 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MesCoin Exchange - Official App</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MESCOIN</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
-body{background:#050505;color:#fff;min-height:100vh}
-header{background:#111;padding:15px;text-align:center;border-bottom:2px solid #ffcc00;position:sticky;top:0;z-index:10}
-header h1{color:#ffcc00;letter-spacing:2px}
-.price-bar{background:#1a1a1a;padding:12px;text-align:center;border-bottom:1px solid #333}
-.price-bar span{color:#00ff88;font-size:26px;font-weight:bold}
-.card{background:#141414;border:1px solid #2a2a2a;border-radius:16px;padding:16px;margin:12px auto;max-width:480px}
-.card h3{color:#ffcc00;margin-bottom:10px}
-input{width:100%;padding:14px;margin:7px 0;background:#0f0f0f;border:1px solid #333;border-radius:10px;color:#fff;font-size:16px}
-button{width:100%;padding:14px;margin:7px 0;border:none;border-radius:10px;font-weight:bold;font-size:16px;cursor:pointer}
-.btn-yellow{background:#ffcc00;color:#000}
-.btn-outline{background:transparent;border:1px solid #ffcc00;color:#ffcc00}
-.flex{display:flex;gap:8px}
-.small{font-size:12px;color:#888}
-.hidden{display:none}
-.badge{display:inline-block;background:#222;border:1px solid #ffcc00;color:#ffcc00;padding:4px 10px;border-radius:20px;font-size:12px}
-.order-row{background:#0f0f0f;padding:10px;border-radius:10px;margin:6px 0;display:flex;justify-content:space-between;border-left:4px solid #ffcc00}
-.buy-border{border-left-color:#00ff88}
-.sell-border{border-left-color:#ff4444}
-.tabs{display:flex;gap:8px;margin:10px auto;max-width:480px}
-.tabs button{flex:1}
-.active-tab{background:#ffcc00 !important;color:#000 !important}
+body{font-family:system-ui;max-width:430px;margin:auto;padding:16px;background:#f0fdf4}
+input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box}
+button{background:#16a34a;color:#fff;border:none;font-weight:bold}
+.card{background:#fff;padding:16px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+h1{color:#16a34a;text-align:center}
 </style>
 </head>
 <body>
+<h1>MESCOIN</h1>
+<p style="text-align:center">Live - Click to Enter Dashboard</p>
+<div class="card">Price: <b id="price">2</b> KES | My MES: <b id="top_mes">-</b></div>
 
-<header>
-  <h1>MESCOIN</h1>
-  <div class="small">MES / KES Exchange - Price starts at 2 KES</div>
-</header>
-
-<div class="price-bar">
-  Live Price: <span id="livePrice">2.0000</span> KES / MES <span id="priceChange" class="badge">+0%</span>
-  <div class="small">Price goes UP when buy orders > sell orders</div>
+<div id="auth" class="card">
+<b>CREATE ACCOUNT</b><br><br>
+<input id="full_name" placeholder="Full Name">
+<input id="phone" placeholder="Mobile e.g 0768871831">
+<input id="password" type="password" placeholder="Password">
+<button id="btnSignup" onclick="signup()">SIGN UP (1000 KES + 10 MES Free)</button>
+<hr>
+<b>ALREADY HAVE ACCOUNT?</b><br><br>
+<input id="login_id" placeholder="Mobile or MES Account">
+<input id="login_password" type="password" placeholder="Password">
+<button id="btnLogin" onclick="login()" style="background:#111">LOGIN → GO TO DASHBOARD</button>
+<p id="msg" style="color:red;font-size:13px"></p>
 </div>
 
-<!-- AUTH -->
-<div id="authSection" class="card">
-  <h3>Create Account / Login</h3>
-  <input id="email" type="email" placeholder="Email (e.g. john@gmail.com)">
-  <input id="phone" type="tel" placeholder="Phone (e.g. 0712345678)">
-  <input id="password" type="password" placeholder="Password (min 6 chars)">
-  <div class="flex">
-    <button class="btn-yellow" onclick="signup()">Sign Up</button>
-    <button class="btn-outline" onclick="login()">Login</button>
-  </div>
-  <p id="authMsg" class="small"></p>
-  <p class="small" style="margin-top:10px">When you sign up, server creates MesCoin account automatically: MESxxxxxxx. Saved in Postgres.</p>
+<div id="dash" style="display:none">
+<div class="card" style="background:#dcfce7">
+<b id="p_name"></b> ✅ Logged In<br>
+Mobile: <span id="p_phone"></span><br>
+Your MES Account: <b id="acc" style="color:#16a34a;font-size:22px"></b><br><br>
+KES Balance: <b id="kes"></b><br>
+MES Balance: <b id="mes"></b>
 </div>
-
-<!-- APP -->
-<div id="appSection" class="hidden">
-  <div class="card">
-    <h3>My Profile</h3>
-    <div>Mes Account: <b id="mesAcc" style="color:#ffcc00"></b> <button style="width:auto;padding:4px 8px;font-size:12px" onclick="copyAcc()">Copy</button></div>
-    <div style="margin-top:8px">Email: <span id="uEmail"></span><br>Phone: <span id="uPhone"></span></div>
-    <div class="flex" style="margin-top:12px">
-      <div style="flex:1;background:#0f0f0f;padding:10px;border-radius:10px;text-align:center">KES<br><b id="kesBal" style="color:#00ff88">0</b></div>
-      <div style="flex:1;background:#0f0f0f;padding:10px;border-radius:10px;text-align:center">MES<br><b id="mesBal" style="color:#ffcc00">0</b></div>
-    </div>
-    <button class="btn-outline" onclick="logout()" style="margin-top:10px">Logout</button>
-  </div>
-
-  <div class="tabs">
-    <button id="tabBuy" class="btn-yellow active-tab" onclick="switchTab('buy')">BUY</button>
-    <button id="tabSell" class="btn-outline" onclick="switchTab('sell')">SELL</button>
-  </div>
-
-  <div id="buyCard" class="card">
-    <h3>Buy MES</h3>
-    <input id="buyAmt" type="number" placeholder="Amount MES you want (e.g. 100)">
-    <input id="buyPrice" type="number" placeholder="Price per MES (e.g. 2.1)">
-    <div class="small">Total KES needed: <span id="buyTotal">0</span></div>
-    <button class="btn-yellow" onclick="placeBuy()">Place Buy Order</button>
-    <div class="small">Server will match you automatically with sellers. If no sellers, price will increase.</div>
-  </div>
-
-  <div id="sellCard" class="card hidden">
-    <h3>Sell MES</h3>
-    <input id="sellAmt" type="number" placeholder="Amount MES to sell">
-    <input id="sellPrice" type="number" placeholder="Price per MES (e.g. 2.5)">
-    <div class="small">You will receive: <span id="sellTotal">0</span> KES</div>
-    <button class="btn-yellow" onclick="placeSell()">Place Sell Order</button>
-    <div class="small">Put your MesCoin account: <b id="sellAcc"></b> in receiver if sending externally</div>
-  </div>
-
-  <div class="card">
-    <h3>Market - Open Orders</h3>
-    <button class="btn-outline" onclick="loadMarket()" style="padding:8px">Refresh Market</button>
-    <div id="marketList" style="margin-top:10px"></div>
-  </div>
-
-  <div class="card">
-    <h3>My Orders</h3>
-    <div id="myOrdersList"></div>
-  </div>
+<div class="card">
+<h3>Send MES</h3>
+<input id="to_account" placeholder="Receiver MES123456">
+<input id="send_amt" type="number" placeholder="Amount e.g 5">
+<button onclick="sendMes()" style="background:#2563eb">SEND NOW</button>
+</div>
+<div class="card">
+<h3>Buy / Sell</h3>
+<input id="amt" type="number" placeholder="Amount">
+<button onclick="trade('buy')">BUY</button>
+<button onclick="trade('sell')" style="background:#dc2626">SELL</button>
+</div>
+<div class="card">
+<h3>History</h3>
+<table id="orders" style="width:100%;font-size:12px"></table><br>
+<button onclick="logout()" style="background:#333">Logout</button>
+</div>
 </div>
 
 <script>
-// YOUR SERVER - CONNECTS TO RENDER + POSTGRES
-const API = 'https://mescoin-1.onrender.com';
-let token = localStorage.getItem('mes_token');
-let currentPrice = 2.0;
+let token = localStorage.getItem('mes_token')||null;
+async function loadPrice(){ try{ let r=await fetch('/api/price'); let d=await r.json(); document.getElementById('price').innerText=d.price; }catch{} } loadPrice();
 
-function $(id){return document.getElementById(id)}
-
-if(token){ showApp(); }
-
-// Auto calc totals
-$('buyAmt').addEventListener('input', ()=>{ $('buyTotal').innerText = (parseFloat($('buyAmt').value||0)*parseFloat($('buyPrice').value||0)).toFixed(2)+' KES'; });
-$('buyPrice').addEventListener('input', ()=>{ $('buyTotal').innerText = (parseFloat($('buyAmt').value||0)*parseFloat($('buyPrice').value||0)).toFixed(2)+' KES'; });
-$('sellAmt').addEventListener('input', ()=>{ $('sellTotal').innerText = (parseFloat($('sellAmt').value||0)*parseFloat($('sellPrice').value||0)).toFixed(2)+' KES'; });
-$('sellPrice').addEventListener('input', ()=>{ $('sellTotal').innerText = (parseFloat($('sellAmt').value||0)*parseFloat($('sellPrice').value||0)).toFixed(2)+' KES'; });
-
-function switchTab(t){
-  if(t==='buy'){ $('buyCard').classList.remove('hidden'); $('sellCard').classList.add('hidden'); $('tabBuy').classList.add('active-tab'); $('tabSell').classList.remove('active-tab'); }
-  else { $('sellCard').classList.remove('hidden'); $('buyCard').classList.add('hidden'); $('tabSell').classList.add('active-tab'); $('tabBuy').classList.remove('active-tab'); }
+function goToDashboard(user){
+  document.getElementById('auth').style.display='none';
+  document.getElementById('dash').style.display='block';
+  document.getElementById('p_name').innerText=user.full_name;
+  document.getElementById('p_phone').innerText=user.phone;
+  document.getElementById('acc').innerText=user.mes_account;
+  document.getElementById('kes').innerText=user.kes_balance;
+  document.getElementById('mes').innerText=user.mes_balance;
+  document.getElementById('top_mes').innerText=user.mes_balance;
+  loadOrders();
+  window.scrollTo(0,0);
 }
 
 async function signup(){
-  $('authMsg').innerText='Creating account...';
+  let btn=document.getElementById('btnSignup'); btn.innerText='Creating...'; btn.disabled=true;
   try{
-    const res = await fetch(API+'/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value,phone:$('phone').value,password:$('password').value})});
-    const d = await res.json();
-    if(d.token){ localStorage.setItem('mes_token',d.token); token=d.token; $('authMsg').innerText='Account created! MES: '+d.mesAccount; showApp(); }
-    else $('authMsg').innerText=d.error;
-  }catch(e){ $('authMsg').innerText='Server waking up... wait 30s and try again'; }
+    let r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:document.getElementById('full_name').value.trim(),phone:document.getElementById('phone').value.trim(),password:document.getElementById('password').value})});
+    let d=await r.json();
+    if(d.error){ document.getElementById('msg').innerText=d.error; btn.innerText='SIGN UP'; btn.disabled=false; return; }
+    token=d.token; localStorage.setItem('mes_token',token);
+    alert('Account Created! Welcome '+d.user.full_name);
+    goToDashboard(d.user);
+  }catch(e){ document.getElementById('msg').innerText='Network error, try again'; }
+  btn.innerText='SIGN UP (1000 KES + 10 MES Free)'; btn.disabled=false;
 }
 
 async function login(){
-  $('authMsg').innerText='Logging in...';
+  let btn=document.getElementById('btnLogin'); btn.innerText='Checking...'; btn.disabled=true;
   try{
-    const res = await fetch(API+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value,password:$('password').value})});
-    const d = await res.json();
-    if(d.token){ localStorage.setItem('mes_token',d.token); token=d.token; showApp(); }
-    else $('authMsg').innerText=d.error;
-  }catch(e){ $('authMsg').innerText='Server waking up... wait 30s'; }
+    let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login_id:document.getElementById('login_id').value.trim(),password:document.getElementById('login_password').value})});
+    let d=await r.json();
+    if(d.error){ document.getElementById('msg').innerText=d.error; btn.innerText='LOGIN → GO TO DASHBOARD'; btn.disabled=false; return; }
+    token=d.token; localStorage.setItem('mes_token',token);
+    goToDashboard(d.user);
+  }catch(e){ document.getElementById('msg').innerText='Network error'; }
+  btn.innerText='LOGIN → GO TO DASHBOARD'; btn.disabled=false;
 }
 
-function logout(){ localStorage.removeItem('mes_token'); location.reload(); }
+async function loadOrders(){ try{ let r=await fetch('/api/orders',{headers:{Authorization:'Bearer '+token}}); let list=await r.json(); let h='<tr><th>Type</th><th>Amt</th><th>To/From</th></tr>'; list.forEach(o=>{ let other=o.type==='SEND'?o.to_account:o.type==='RECEIVED'?o.from_account:''; h+='<tr><td>'+o.type+'</td><td>'+o.amount+'</td><td>'+(other||'-')+'</td></tr>'; }); document.getElementById('orders').innerHTML=h; }catch{} }
 
-async function showApp(){
-  $('authSection').classList.add('hidden');
-  $('appSection').classList.remove('hidden');
-  await loadProfile();
-  await loadPrice();
-  await loadMarket();
-  await loadMyOrders();
-  setInterval(loadPrice, 5000);
-}
+async function trade(type){ let a=parseFloat(document.getElementById('amt').value); if(!a)return alert('Enter amount'); let r=await fetch('/api/trade',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({type,amount:a})}); let d=await r.json(); if(d.error)return alert(d.error); document.getElementById('kes').innerText=d.user.kes_balance; document.getElementById('mes').innerText=d.user.mes_balance; document.getElementById('top_mes').innerText=d.user.mes_balance; loadOrders(); }
 
-async function loadProfile(){
-  const res = await fetch(API+'/api/profile',{headers:{Authorization:'Bearer '+token}});
-  const u = await res.json();
-  if(u.email){
-    $('uEmail').innerText=u.email; $('uPhone').innerText=u.phone;
-    $('mesAcc').innerText=u.mes_account; $('sellAcc').innerText=u.mes_account;
-    $('kesBal').innerText=parseFloat(u.kes_balance).toFixed(2);
-    $('mesBal').innerText=parseFloat(u.mes_balance).toFixed(4);
-  }
-}
+async function sendMes(){ let to=document.getElementById('to_account').value.trim().toUpperCase(); let amt=parseFloat(document.getElementById('send_amt').value); if(!to||!amt)return alert('Enter account and amount'); if(!confirm('Send '+amt+' MES to '+to+'?'))return; let r=await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({to_account:to,amount:amt})}); let d=await r.json(); if(d.error){ alert(d.error); return; } alert(d.message); document.getElementById('kes').innerText=d.user.kes_balance; document.getElementById('mes').innerText=d.user.mes_balance; document.getElementById('top_mes').innerText=d.user.mes_balance; loadOrders(); document.getElementById('to_account').value=''; document.getElementById('send_amt').value=''; }
 
-async function loadPrice(){
-  try{
-    const res = await fetch(API+'/api/price');
-    const d = await res.json();
-    const newPrice = parseFloat(d.price);
-    if(newPrice > currentPrice) $('priceChange').innerText = '+' + ((newPrice-currentPrice)/currentPrice*100).toFixed(2)+'%';
-    currentPrice = newPrice;
-    $('livePrice').innerText = currentPrice.toFixed(4);
-    $('buyPrice').placeholder = currentPrice.toFixed(4);
-    $('sellPrice').placeholder = (currentPrice*1.05).toFixed(4);
-  }catch(e){}
-}
+function logout(){ localStorage.removeItem('mes_token'); token=null; document.getElementById('auth').style.display='block'; document.getElementById('dash').style.display='none'; }
 
-async function placeBuy(){
-  const amount = parseFloat($('buyAmt').value);
-  const price = parseFloat($('buyPrice').value);
-  if(!amount||!price) return alert('Enter amount and price');
-  const res = await fetch(API+'/api/buy',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount,price})});
-  const d = await res.json();
-  alert(d.message || d.error);
-  loadProfile(); loadMarket(); loadMyOrders(); loadPrice();
-}
-
-async function placeSell(){
-  const amount = parseFloat($('sellAmt').value);
-  const price = parseFloat($('sellPrice').value);
-  if(!amount||!price) return alert('Enter amount and price');
-  const res = await fetch(API+'/api/sell',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount,price})});
-  const d = await res.json();
-  alert(d.message || d.error);
-  loadProfile(); loadMarket(); loadMyOrders();
-}
-
-async function loadMarket(){
-  const res = await fetch(API+'/api/orders');
-  const orders = await res.json();
-  $('marketList').innerHTML = orders.length? orders.map(o=>`
-    <div class="order-row ${o.type==='buy'?'buy-border':'sell-border'}">
-      <span><b>${o.type.toUpperCase()}</b> ${parseFloat(o.amount).toFixed(2)} MES</span>
-      <span>@ ${parseFloat(o.price).toFixed(4)} KES</span>
-    </div>`).join('') : '<div class="small">No open orders - you are first!</div>';
-}
-
-async function loadMyOrders(){
-  const res = await fetch(API+'/api/myorders',{headers:{Authorization:'Bearer '+token}});
-  const orders = await res.json();
-  $('myOrdersList').innerHTML = orders.length? orders.map(o=>`
-    <div class="order-row">
-      <span>${o.type} ${parseFloat(o.amount).toFixed(2)} @ ${parseFloat(o.price).toFixed(4)}</span>
-      <span class="badge">${o.status}</span>
-    </div>`).join('') : '<div class="small">No orders yet</div>';
-}
-
-function copyAcc(){ navigator.clipboard.writeText($('mesAcc').innerText); alert('Mes account copied: '+$('mesAcc').innerText); }
+(async()=>{ if(token){ try{ let r=await fetch('/api/me',{headers:{Authorization:'Bearer '+token}}); if(r.ok){ let u=await r.json(); goToDashboard(u); } }catch{} } })();
 </script>
 </body>
-    </html>
+                                                                         </html>
