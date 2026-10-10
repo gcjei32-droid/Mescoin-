@@ -110,4 +110,5 @@ function logout(){ localStorage.removeItem('mes_token'); token=null; document.ge
 (async()=>{ if(token){ try{ let r=await fetch('/api/me',{headers:{Authorization:'Bearer '+token}}); if(r.ok){ let u=await r.json(); goToDashboard(u); } }catch{} } })();
 </script>
 </body>
-                                                                         </html>
+  </html>
+  
