@@ -1,114 +1,30 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MESCOIN</title>
-<style>
-body{font-family:system-ui;max-width:430px;margin:auto;padding:16px;background:#f0fdf4}
-input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box}
-button{background:#16a34a;color:#fff;border:none;font-weight:bold}
-.card{background:#fff;padding:16px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
-h1{color:#16a34a;text-align:center}
-</style>
-</head>
-<body>
-<h1>MESCOIN</h1>
-<p style="text-align:center">Live - Click to Enter Dashboard</p>
-<div class="card">Price: <b id="price">2</b> KES | My MES: <b id="top_mes">-</b></div>
-
-<div id="auth" class="card">
-<b>CREATE ACCOUNT</b><br><br>
-<input id="full_name" placeholder="Full Name">
-<input id="phone" placeholder="Mobile e.g 0768871831">
-<input id="password" type="password" placeholder="Password">
-<button id="btnSignup" onclick="signup()">SIGN UP (1000 KES + 10 MES Free)</button>
-<hr>
-<b>ALREADY HAVE ACCOUNT?</b><br><br>
-<input id="login_id" placeholder="Mobile or MES Account">
-<input id="login_password" type="password" placeholder="Password">
-<button id="btnLogin" onclick="login()" style="background:#111">LOGIN → GO TO DASHBOARD</button>
-<p id="msg" style="color:red;font-size:13px"></p>
-</div>
-
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>MESCOIN P2P</title><style>body{font-family:system-ui;max-width:460px;margin:auto;padding:12px;background:#f0fdf4}input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box}button{background:#16a34a;color:#fff;border:none;font-weight:bold}.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}h1{color:#16a34a;text-align:center}.order{background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:10px;margin:6px 0}</style></head><body>
+<h1>MESCOIN P2P</h1><p style="text-align:center">1 MES = 2 KES | No MPESA popup | Direct contact</p>
+<div class="card">My MES: <b id="top_mes">-</b> | KES: <b id="top_kes">-</b></div>
+<div id="auth" class="card"><b>CREATE</b><input id="full_name" placeholder="Full Name"><input id="phone" placeholder="Mobile 0768..."><input id="password" type="password" placeholder="Password"><button onclick="signup()">SIGN UP</button><hr><b>LOGIN</b><input id="login_id" placeholder="Mobile or MES"><input id="login_password" type="password" placeholder="Password"><button onclick="login()" style="background:#111">LOGIN</button><p id="msg" style="color:red"></p></div>
 <div id="dash" style="display:none">
-<div class="card" style="background:#dcfce7">
-<b id="p_name"></b> ✅ Logged In<br>
-Mobile: <span id="p_phone"></span><br>
-Your MES Account: <b id="acc" style="color:#16a34a;font-size:22px"></b><br><br>
-KES Balance: <b id="kes"></b><br>
-MES Balance: <b id="mes"></b>
+<div class="card" style="background:#dcfce7"><b id="p_name"></b><br>Mobile: <span id="p_phone"></span><br>MES: <b id="acc"></b><br>KES: <b id="kes"></b><br>MES: <b id="mes"></b></div>
+<div class="card" style="border:2px solid #16a34a"><h3>BUY MES</h3><input id="buy_amt" type="number" placeholder="100"><button onclick="buyOrder()">POST BUY ORDER</button></div>
+<div class="card" style="border:2px solid #dc2626"><h3>SELL MES</h3><input id="sell_amt" type="number" placeholder="100"><button onclick="sellOrder()" style="background:#dc2626">POST SELL ORDER</button></div>
+<div class="card" style="border:2px solid #2563eb"><h3>LIVE MARKET - All Users See Phone + MES</h3><b>BUY ORDERS:</b><div id="market_buys"></div><hr><b>SELL ORDERS:</b><div id="market_sells"></div><br><button onclick="loadMarket()" style="background:#2563eb">Refresh Market</button></div>
+<div class="card"><h3>My Orders</h3><table id="orders" style="width:100%;font-size:12px"></table></div>
+<div class="card"><h3>Send MES</h3><input id="to_account" placeholder="MES... or 07..."><input id="send_amt" type="number" placeholder="Amount"><button onclick="sendMes()" style="background:#2563eb">SEND</button></div>
+<div class="card"><button onclick="logout()" style="background:#333">Logout</button></div>
 </div>
-<div class="card">
-<h3>Send MES</h3>
-<input id="to_account" placeholder="Receiver MES123456">
-<input id="send_amt" type="number" placeholder="Amount e.g 5">
-<button onclick="sendMes()" style="background:#2563eb">SEND NOW</button>
-</div>
-<div class="card">
-<h3>Buy / Sell</h3>
-<input id="amt" type="number" placeholder="Amount">
-<button onclick="trade('buy')">BUY</button>
-<button onclick="trade('sell')" style="background:#dc2626">SELL</button>
-</div>
-<div class="card">
-<h3>History</h3>
-<table id="orders" style="width:100%;font-size:12px"></table><br>
-<button onclick="logout()" style="background:#333">Logout</button>
-</div>
-</div>
-
 <script>
-let token = localStorage.getItem('mes_token')||null;
-async function loadPrice(){ try{ let r=await fetch('/api/price'); let d=await r.json(); document.getElementById('price').innerText=d.price; }catch{} } loadPrice();
-
-function goToDashboard(user){
-  document.getElementById('auth').style.display='none';
-  document.getElementById('dash').style.display='block';
-  document.getElementById('p_name').innerText=user.full_name;
-  document.getElementById('p_phone').innerText=user.phone;
-  document.getElementById('acc').innerText=user.mes_account;
-  document.getElementById('kes').innerText=user.kes_balance;
-  document.getElementById('mes').innerText=user.mes_balance;
-  document.getElementById('top_mes').innerText=user.mes_balance;
-  loadOrders();
-  window.scrollTo(0,0);
-}
-
-async function signup(){
-  let btn=document.getElementById('btnSignup'); btn.innerText='Creating...'; btn.disabled=true;
-  try{
-    let r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:document.getElementById('full_name').value.trim(),phone:document.getElementById('phone').value.trim(),password:document.getElementById('password').value})});
-    let d=await r.json();
-    if(d.error){ document.getElementById('msg').innerText=d.error; btn.innerText='SIGN UP'; btn.disabled=false; return; }
-    token=d.token; localStorage.setItem('mes_token',token);
-    alert('Account Created! Welcome '+d.user.full_name);
-    goToDashboard(d.user);
-  }catch(e){ document.getElementById('msg').innerText='Network error, try again'; }
-  btn.innerText='SIGN UP (1000 KES + 10 MES Free)'; btn.disabled=false;
-}
-
-async function login(){
-  let btn=document.getElementById('btnLogin'); btn.innerText='Checking...'; btn.disabled=true;
-  try{
-    let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login_id:document.getElementById('login_id').value.trim(),password:document.getElementById('login_password').value})});
-    let d=await r.json();
-    if(d.error){ document.getElementById('msg').innerText=d.error; btn.innerText='LOGIN → GO TO DASHBOARD'; btn.disabled=false; return; }
-    token=d.token; localStorage.setItem('mes_token',token);
-    goToDashboard(d.user);
-  }catch(e){ document.getElementById('msg').innerText='Network error'; }
-  btn.innerText='LOGIN → GO TO DASHBOARD'; btn.disabled=false;
-}
-
-async function loadOrders(){ try{ let r=await fetch('/api/orders',{headers:{Authorization:'Bearer '+token}}); let list=await r.json(); let h='<tr><th>Type</th><th>Amt</th><th>To/From</th></tr>'; list.forEach(o=>{ let other=o.type==='SEND'?o.to_account:o.type==='RECEIVED'?o.from_account:''; h+='<tr><td>'+o.type+'</td><td>'+o.amount+'</td><td>'+(other||'-')+'</td></tr>'; }); document.getElementById('orders').innerHTML=h; }catch{} }
-
-async function trade(type){ let a=parseFloat(document.getElementById('amt').value); if(!a)return alert('Enter amount'); let r=await fetch('/api/trade',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({type,amount:a})}); let d=await r.json(); if(d.error)return alert(d.error); document.getElementById('kes').innerText=d.user.kes_balance; document.getElementById('mes').innerText=d.user.mes_balance; document.getElementById('top_mes').innerText=d.user.mes_balance; loadOrders(); }
-
-async function sendMes(){ let to=document.getElementById('to_account').value.trim().toUpperCase(); let amt=parseFloat(document.getElementById('send_amt').value); if(!to||!amt)return alert('Enter account and amount'); if(!confirm('Send '+amt+' MES to '+to+'?'))return; let r=await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({to_account:to,amount:amt})}); let d=await r.json(); if(d.error){ alert(d.error); return; } alert(d.message); document.getElementById('kes').innerText=d.user.kes_balance; document.getElementById('mes').innerText=d.user.mes_balance; document.getElementById('top_mes').innerText=d.user.mes_balance; loadOrders(); document.getElementById('to_account').value=''; document.getElementById('send_amt').value=''; }
-
-function logout(){ localStorage.removeItem('mes_token'); token=null; document.getElementById('auth').style.display='block'; document.getElementById('dash').style.display='none'; }
-
-(async()=>{ if(token){ try{ let r=await fetch('/api/me',{headers:{Authorization:'Bearer '+token}}); if(r.ok){ let u=await r.json(); goToDashboard(u); } }catch{} } })();
-</script>
-</body>
-  </html>
-  
+let token=localStorage.getItem("mes_token")||null;
+function goToDashboard(u){document.getElementById("auth").style.display="none";document.getElementById("dash").style.display="block";document.getElementById("p_name").innerText=u.full_name;document.getElementById("p_phone").innerText=u.phone;document.getElementById("acc").innerText=u.mes_account;document.getElementById("kes").innerText=u.kes_balance;document.getElementById("mes").innerText=u.mes_balance;document.getElementById("top_mes").innerText=u.mes_balance;document.getElementById("top_kes").innerText=u.kes_balance;loadOrders();loadMarket();}
+async function signup(){let r=await fetch("/api/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({full_name:full_name.value,phone:phone.value,password:password.value})});let d=await r.json();if(d.error){msg.innerText=d.error;return;}token=d.token;localStorage.setItem("mes_token",token);goToDashboard(d.user);}
+async function login(){let r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({login_id:login_id.value,password:login_password.value})});let d=await r.json();if(d.error){msg.innerText=d.error;return;}token=d.token;localStorage.setItem("mes_token",token);goToDashboard(d.user);}
+async function loadOrders(){let r=await fetch("/api/orders",{headers:{Authorization:"Bearer "+token}});let list=await r.json();let h="<tr><th>Type</th><th>Amt</th><th>Status</th><th>Action</th></tr>";list.forEach(o=>{let btn="";if(o.status==="PENDING")btn="<button onclick=\"cancelOrder('"+o.id+"')\" style=\"background:red;padding:4px;width:auto;\">Cancel</button>";else if(o.status==="MATCHED")btn="<button onclick=\"completeOrder('"+o.id+"')\" style=\"background:green;padding:4px;width:auto;\">Complete</button>";h+="<tr><td>"+o.type+"</td><td>"+o.amount+"</td><td>"+o.status+"</td><td>"+btn+"</td></tr>"});orders.innerHTML=h;}
+async function cancelOrder(id){if(!confirm("Cancel?"))return;let r=await fetch("/api/order/cancel/"+id,{method:"POST",headers:{Authorization:"Bearer "+token}});let d=await r.json();alert(d.message||d.error);loadMe();}
+async function completeOrder(id){if(!confirm("Received KES? Complete?"))return;let r=await fetch("/api/order/complete/"+id,{method:"POST",headers:{Authorization:"Bearer "+token}});let d=await r.json();alert(d.message||d.error);loadMe();}
+async function loadMe(){let mr=await fetch("/api/me",{headers:{Authorization:"Bearer "+token}});if(mr.ok)goToDashboard(await mr.json());}
+async function loadMarket(){let r=await fetch("/api/market");let d=await r.json();let hb="";if(d.buys.length==0)hb="No buy orders";else d.buys.forEach(o=>{hb+="<div class=order><b>"+o.full_name+"</b> WANTS "+o.amount+" MES (Pays "+(o.amount*2)+" KES)<br>Phone: <a href=tel:"+o.phone+">"+o.phone+"</a><br>MES: "+o.mes_account+"</div>"});market_buys.innerHTML=hb;let hs="";if(d.sells.length==0)hs="No sell orders";else d.sells.forEach(o=>{hs+="<div class=order><b>"+o.full_name+"</b> SELLS "+o.amount+" MES (For "+(o.amount*2)+" KES)<br>Phone: <a href=tel:"+o.phone+">"+o.phone+"</a><br>MES: "+o.mes_account+"</div>"});market_sells.innerHTML=hs;}
+async function buyOrder(){let a=buy_amt.value;let r=await fetch("/api/order/buy",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({amount:a})});let d=await r.json();alert(d.message||d.error);loadMe();loadMarket();}
+async function sellOrder(){let a=sell_amt.value;let r=await fetch("/api/order/sell",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({amount:a})});let d=await r.json();alert(d.message||d.error);loadMe();loadMarket();}
+async function sendMes(){let r=await fetch("/api/send",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({to_account:to_account.value,amount:send_amt.value})});let d=await r.json();alert(d.message||d.error);loadMe();}
+function logout(){localStorage.removeItem("mes_token");location.reload();}
+(async()=>{if(token){let r=await fetch("/api/me",{headers:{Authorization:"Bearer "+token}});if(r.ok)goToDashboard(await r.json());}loadMarket();})();
+setInterval(()=>{ if(token) loadMarket(); }, 5000);
+</script></body></html>
