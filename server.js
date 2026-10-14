@@ -2,7 +2,6 @@ const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const axios = require('axios');
 const crypto = require('crypto');
 const path = require('path');
 const app = express();
@@ -10,13 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 const SECRET = 'mescoin-secret-2026';
-// FIX 1 - Don't wipe on restart on Render
 const DB_FILE = fs.existsSync('/data')? '/data/database.json' : './database.json';
-const CK = process.env.MPESA_CONSUMER_KEY;
-const CS = process.env.MPESA_CONSUMER_SECRET;
-const PASSKEY = process.env.MPESA_PASSKEY;
-const SHORTCODE = process.env.MPESA_SHORTCODE || '174379';
-const CALLBACK = process.env.MPESA_CALLBACK_URL || 'https://mescoin-1.onrender.com/api/mpesa/callback';
 
 function calculateHash(prev_hash, timestamp, transactions, nonce){
   return crypto.createHash('sha256').update(prev_hash + timestamp + JSON.stringify(transactions) + nonce).digest('hex');
@@ -87,10 +80,8 @@ let trades=db.trades||[];
 let blockchain=db.blockchain||[createGenesisBlock()];
 function save(){ saveDB({users,orders,trades,blockchain}); }
 
-// ====== FOUNDER 100M ======
 const FOUNDER_PHONE = "0768871831";
 const FOUNDER_AMOUNT = 100000000;
-// FIX 2 - Proper phone cleaner
 function cleanPhone(p){ return (p||'').toString().replace(/\D/g,'').replace(/^0/,'').replace(/^254/,''); }
 
 (function fundFounderOnBoot(){
@@ -101,7 +92,6 @@ function cleanPhone(p){ return (p||'').toString().replace(/\D/g,'').replace(/^0/
         let block = mineBlock([{from:"GENESIS_BANK_100M", to: founder.mes_account, amount: FOUNDER_AMOUNT, note:"Founder 100M allocation"}]);
         blockchain.push(block);
         save();
-        console.log("FOUNDER 100M FUNDED: "+founder.mes_account);
     }
   }catch(e){ console.log("Founder boot error", e.message); }
 })();
@@ -115,11 +105,6 @@ function auth(req,res,next){
     next();
   }catch{ return res.status(401).json({error:'Invalid token'}); }
 }
-async function getToken(){
-  let b=Buffer.from(`${CK}:${CS}`).toString('base64');
-  let r=await axios.get('https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',{headers:{Authorization:`Basic ${b}`}});
-  return r.data.access_token;
-}
 
 app.get('/api/price', (req,res)=>res.json({price:2}));
 app.get('/api/blockchain', (req,res)=>{
@@ -130,17 +115,10 @@ app.get('/api/blockchain/balance/:account', (req,res)=>{
   res.json({account: req.params.account, blockchain_balance: bal, chain_length: blockchain.length});
 });
 
-// FIX 3 - Add debug routes to see STK real error
-app.get('/api/mpesa/test', async (req,res)=>{
-  try{ let t=await getToken(); res.json({ok:true, token:t.slice(0,20)+'...'}); }
-  catch(e){ res.json({ok:false, error:e.response?.data||e.message}); }
-});
-
 app.post('/api/signup', (req,res)=>{
   let {full_name, phone, password}=req.body;
   if(!full_name||!phone||!password) return res.status(400).json({error:'All required'});
   let cp=cleanPhone(phone);
-  // FIX 4 - Block same phone twice
   if(users.find(u=>cleanPhone(u.phone)===cp)) return res.status(400).json({error:'Mobile already registered - click LOGIN'});
   let user={id:Date.now().toString(), full_name:full_name.trim(), phone:cp, password, mes_account:'MES'+Math.floor(100000+Math.random()*900000), kes_balance:0, mes_balance:0};
   if(cleanPhone(phone) === cleanPhone(FOUNDER_PHONE)){
@@ -171,14 +149,29 @@ app.get('/api/me', auth, (req,res)=>{
   res.json({...req.user, blockchain_balance: chainBal});
 });
 app.get('/api/orders', auth, (req,res)=>{
-  let list=orders.filter(o=>o.userId===req.user.id).slice(-20).reverse();
+  let list=orders.filter(o=>o.userId===req.user.id).slice(-30).reverse();
   res.json(list);
 });
+
+// NEW - PUBLIC ORDER BOOK WITH PHONE + MES ACCOUNT FOR COMMUNICATION
 app.get('/api/market', (req,res)=>{
-  res.json({buys:orders.filter(o=>o.type==='BUY'&&o.status==='PENDING').slice(-20), sells:orders.filter(o=>o.type==='SELL'&&o.status==='PENDING').slice(-20)});
+  function enrich(o){
+    let u=users.find(x=>x.id===o.userId);
+    return {
+     ...o,
+      full_name: u?.full_name||'Unknown',
+      phone: u?.phone||'',
+      mes_account: u?.mes_account||'',
+      kes_total: o.amount*2
+    };
+  }
+  res.json({
+    buys: orders.filter(o=>o.type==='BUY'&&o.status==='PENDING').map(enrich).slice(-50).reverse(),
+    sells: orders.filter(o=>o.type==='SELL'&&o.status==='PENDING').map(enrich).slice(-50).reverse(),
+    matched: orders.filter(o=>o.status==='MATCHED').map(enrich).slice(-20).reverse()
+  });
 });
 
-// FIX 5 - Cancel stuck orders and return MES
 app.post('/api/order/cancel/:id', auth, (req,res)=>{
   let o=orders.find(x=>x.id==req.params.id && x.userId===req.user.id);
   if(!o) return res.status(404).json({error:'Order not found'});
@@ -189,38 +182,24 @@ app.post('/api/order/cancel/:id', auth, (req,res)=>{
   save(); res.json({message:'Cancelled, MES returned', user:req.user});
 });
 
-app.post('/api/order/buy', auth, async (req,res)=>{
+// BUY - NO MPESA, JUST CREATE ORDER
+app.post('/api/order/buy', auth, (req,res)=>{
   let {amount}=req.body; amount=parseFloat(amount);
   if(!amount) return res.status(400).json({error:'Enter amount'});
-  // FIX 6 - Block self-match with same phone number
   let sellMatch=orders.find(o=>o.type==='SELL'&&o.status==='PENDING'&&o.userId!==req.user.id&&cleanPhone(users.find(u=>u.id===o.userId)?.phone)!==cleanPhone(req.user.phone)&&o.amount===amount);
   let buyOrder={id:Date.now().toString(), userId:req.user.id, type:'BUY', amount, price:2, status: sellMatch?'MATCHED':'PENDING', matchedWith: sellMatch?sellMatch.id:null, date:new Date()};
   orders.push(buyOrder);
   if(sellMatch){ sellMatch.status='MATCHED'; sellMatch.matchedWith=buyOrder.id; }
   save();
   if(sellMatch){
-    try{
-      let token=await getToken();
-      let timestamp=new Date().toISOString().replace(/[^0-9]/g,'').slice(0,14);
-      let pwd=Buffer.from(SHORTCODE+PASSKEY+timestamp).toString('base64');
-      let phone254='254'+cleanPhone(req.user.phone);
-      let cost=amount*2;
-      await axios.post('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',{
-        BusinessShortCode:SHORTCODE, Password:pwd, Timestamp:timestamp, TransactionType:"CustomerPayBillOnline",
-        Amount:Math.round(cost), PartyA:phone254, PartyB:SHORTCODE, PhoneNumber:phone254,
-        CallBackURL:CALLBACK, AccountReference:buyOrder.id, TransactionDesc:`Buy ${amount} MES`
-      },{headers:{Authorization:`Bearer ${token}`}});
-      return res.json({message:`MATCHED! STK sent to you. Enter PIN.`, user:req.user});
-    }catch(e){
-      // FIX 7 - Show REAL Mpesa error
-      return res.json({message:`Matched but STK FAILED REAL ERROR: ${JSON.stringify(e.response?.data||e.message)}`, user:req.user});
-    }
+    let seller=users.find(u=>u.id===sellMatch.userId);
+    return res.json({message:`MATCHED with seller ${seller.full_name}! Phone: ${seller.phone} MES: ${seller.mes_account}. Call him to send KES ${amount*2} and you will release MES.`, user:req.user, matched_user:seller});
   }
-  res.json({message:`Buy order saved waiting for seller same amount`, user:req.user});
+  res.json({message:`Buy order posted! Now visible to all sellers. Wait for seller to contact you on ${req.user.phone}`, user:req.user});
 });
 
-// FIX 8 - SELL must also try to match and trigger STK to buyer (your old code never did)
-app.post('/api/order/sell', auth, async (req,res)=>{
+// SELL - NO MPESA, JUST CREATE ORDER
+app.post('/api/order/sell', auth, (req,res)=>{
   let {amount}=req.body; amount=parseFloat(amount);
   if(req.user.mes_balance < amount) return res.status(400).json({error:'Not enough MES'});
   let buyMatch=orders.find(o=>o.type==='BUY'&&o.status==='PENDING'&&o.userId!==req.user.id&&cleanPhone(users.find(u=>u.id===o.userId)?.phone)!==cleanPhone(req.user.phone)&&o.amount===amount);
@@ -230,59 +209,36 @@ app.post('/api/order/sell', auth, async (req,res)=>{
   if(buyMatch){ buyMatch.status='MATCHED'; buyMatch.matchedWith=sellOrder.id; }
   save();
   if(buyMatch){
-    try{
-      let token=await getToken();
-      let timestamp=new Date().toISOString().replace(/[^0-9]/g,'').slice(0,14);
-      let pwd=Buffer.from(SHORTCODE+PASSKEY+timestamp).toString('base64');
-      let buyer=users.find(u=>u.id===buyMatch.userId);
-      let phone254='254'+cleanPhone(buyer.phone);
-      let cost=amount*2;
-      await axios.post('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',{
-        BusinessShortCode:SHORTCODE, Password:pwd, Timestamp:timestamp, TransactionType:"CustomerPayBillOnline",
-        Amount:Math.round(cost), PartyA:phone254, PartyB:SHORTCODE, PhoneNumber:phone254,
-        CallBackURL:CALLBACK, AccountReference:buyMatch.id, TransactionDesc:`Buy ${amount} MES`
-      },{headers:{Authorization:`Bearer ${token}`}});
-      return res.json({message:`Matched with buyer! STK sent to buyer ${buyer.phone}`, user:req.user});
-    }catch(e){
-      return res.json({message:`Matched but STK FAILED REAL ERROR: ${JSON.stringify(e.response?.data||e.message)}`, user:req.user});
-    }
+    let buyer=users.find(u=>u.id===buyMatch.userId);
+    return res.json({message:`MATCHED with buyer ${buyer.full_name}! Phone: ${buyer.phone} MES: ${buyer.mes_account}. Wait for him to send KES ${amount*2}`, user:req.user, matched_user:buyer});
   }
-  res.json({message:`Sell order saved, MES locked. Waiting for buyer`, user:req.user});
+  res.json({message:`Sell order posted! MES locked. Now visible to all buyers.`, user:req.user});
 });
 
-app.post('/api/mpesa/callback', (req,res)=>{
-  try{
-    let cb=req.body.Body?.stkCallback;
-    console.log('CALLBACK',JSON.stringify(req.body));
-    if(!cb){ return res.json({ResultCode:0}); }
-    let orderId=cb.AccountReference;
-    let buyOrder=orders.find(o=>o.id===orderId);
-    if(cb.ResultCode!==0){
-      if(buyOrder){ buyOrder.status='PENDING'; let sell=orders.find(o=>o.id===buyOrder.matchedWith); if(sell) sell.status='PENDING'; save(); }
-      return res.json({ResultCode:0});
-    }
-    if(buyOrder){
-      let sellOrder=orders.find(o=>o.id===buyOrder.matchedWith);
-      if(sellOrder){
-        let seller=users.find(u=>u.id===sellOrder.userId);
-        let buyer=users.find(u=>u.id===buyOrder.userId);
-        if(seller&&buyer){
-          let items=cb.CallbackMetadata?.Item||[];
-          let amount=items.find(i=>i.Name==='Amount')?.Value||(buyOrder.amount*2);
-          seller.kes_balance+=Number(amount);
-          buyer.mes_balance+=sellOrder.amount;
-          sellOrder.status='COMPLETED'; buyOrder.status='COMPLETED';
-          trades.push({id:Date.now(), amount:sellOrder.amount, kes:amount, date:new Date()});
-          addToBlockchain([{from: seller.mes_account, to: buyer.mes_account, amount: sellOrder.amount, kes: amount, note: "P2P TRADE "+sellOrder.id}]);
-          save();
-        }
-      }
-    }
-    res.json({ResultCode:0});
-  }catch{ res.json({ResultCode:0}); }
+// COMPLETE TRADE AFTER YOU RECEIVE MONEY OFFLINE
+app.post('/api/order/complete/:id', auth, (req,res)=>{
+  let order=orders.find(o=>o.id==req.params.id);
+  if(!order) return res.status(404).json({error:'Order not found'});
+  if(order.userId!==req.user.id && orders.find(o=>o.matchedWith===order.id)?.userId!==req.user.id){
+    return res.status(403).json({error:'Not your trade'});
+  }
+  if(order.status!=='MATCHED') return res.status(400).json({error:'Order not matched yet'});
+  let sellOrder=order.type==='SELL'?order:orders.find(o=>o.id===order.matchedWith);
+  let buyOrder=order.type==='BUY'?order:orders.find(o=>o.id===order.matchedWith);
+  if(!sellOrder||!buyOrder) return res.status(400).json({error:'Pair not found'});
+  let seller=users.find(u=>u.id===sellOrder.userId);
+  let buyer=users.find(u=>u.id===buyOrder.userId);
+  // Complete
+  sellOrder.status='COMPLETED';
+  buyOrder.status='COMPLETED';
+  if(buyer) buyer.mes_balance+=sellOrder.amount;
+  if(seller) seller.kes_balance+=sellOrder.amount*2;
+  trades.push({id:Date.now(), amount:sellOrder.amount, kes:sellOrder.amount*2, date:new Date()});
+  addToBlockchain([{from: seller.mes_account, to: buyer.mes_account, amount: sellOrder.amount, kes: sellOrder.amount*2, note: "P2P TRADE "+sellOrder.id}]);
+  save();
+  res.json({message:'Trade completed! MES released', user:req.user});
 });
 
-// FIX 9 - Send accepts MESxxx or xxx or 07 phone
 app.post('/api/send', auth, (req,res)=>{
   let {to_account, amount}=req.body; amount=parseFloat(amount);
   if(!to_account) return res.status(400).json({error:'Enter receiver'});
@@ -290,7 +246,7 @@ app.post('/api/send', auth, (req,res)=>{
   let inputPhone=cleanPhone(to_account);
   if(req.user.mes_balance<amount) return res.status(400).json({error:'Not enough MES'});
   let receiver=users.find(u=>u.mes_account.toUpperCase()===input || u.mes_account.toUpperCase()===("MES"+input) || cleanPhone(u.phone)===inputPhone);
-  if(!receiver) return res.status(400).json({error:'Receiver not found - use MESxxx or 07...'});
+  if(!receiver) return res.status(400).json({error:'Receiver not found'});
   if(receiver.id===req.user.id) return res.status(400).json({error:'Cannot send to yourself'});
   req.user.mes_balance-=amount; receiver.mes_balance+=amount;
   orders.push({id:Date.now(), userId:req.user.id, type:'SEND', amount, to_account:receiver.mes_account, date:new Date()});
@@ -300,4 +256,19 @@ app.post('/api/send', auth, (req,res)=>{
 });
 
 app.get('/', (req,res)=>{
-  res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>MESCOIN</title><style>body{font-family:system-ui;max-width:430px;margin:auto;padding:12px;background:#f0fdf4}input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box;font-size:15px}button{background:#16a34a;color:#fff;border:none;font-weight:bold;cursor:pointer}.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}h1{color:#16a34a;text-align:center}</style></head><body><h1>MESCOIN P2P + 100M Founder</h1><p style="text-align:center">Price 2 KES | Founder 100M | Blockchain | Fixed Display</p><div class="card">My MES: <b id="top_mes">-</b> | KES: <b id="top_kes">-</b> | Chain: <b id="chain_len">-</b></div><div id="auth" class="card"><b>CREATE ACCOUNT</b><input id="full_name" placeholder="Full Name"><input id="phone" placeholder="Mobile 0768..."><input id="password" type="password" placeholder="Password"><button onclick="signup()">SIGN UP</button><hr><b>LOGIN</b><input id="login_id" placeholder="Mobile or MES Account"><input id="login_password" type="password" placeholder="Password"><button onclick="login()" style="background:#111">LOGIN</button><p id="msg" style="color:red"></p></div><div id="dash" style="display:none"><div class="card" style="background:#dcfce7"><b id="p_name"></b><br>Mobile: <span id="p_phone"></span><br>MES: <b id="acc" style="font-size:20px;color:#16a34a"></b><br><br>KES: <b id="kes"></b><br>MES: <b id="mes"></b><br>Chain Bal: <b id="chain_bal"></b></div><div class="card"><h3>Blockchain</h3><div id="blockchain" style="font-size:11px;max-height:200px;overflow:auto;background:#111;color:#0f0;padding:8px;border-radius:8px"></div><button onclick="loadChain()" style="background:#333">Refresh Chain</button></div><div class="card"><h3>P2P Market</h3><div id="market" style="font-size:12px"></div><button onclick="loadMarket()" style="background:#555">Refresh Market</button></div><div class="card" style="border:2px solid #16a34a"><h3>BUY</h3><input id="buy_amt" type="number" placeholder="Amount"><button onclick="buyOrder()">BUY ORDER</button></div><div class="card" style="border:2px solid #dc2626"><h3>SELL</h3><input id="sell_amt" type="number" placeholder="Amount"><button onclick="sellOrder()" style="background:#dc2626">SELL ORDER</button></div><div class="card"><h3>Send MES</h3><input id="to_account" placeholder="Receiver MES... or 07..."><input id="send_amt" type="number" placeholder="Amount"><button onclick="sendMes()" style="background:#2563eb">SEND NOW</button></div><div class="card"><h3>History - Now Displays + Cancel</h3><table id="orders" style="width:100%;font-size:12px"></table><br><button onclick="logout()" style="background:#333">Logout</button></div></div><script>let token=localStorage.getItem('mes_token')||null;function goToDashboard(u){document.getElementById('auth').style.display='none';document.getElementById('dash').style.display='block';document.getElementById('p_name').innerText=u.full_name;document.getElementById('p_phone').innerText=u.phone;document.getElementById('acc').innerText=u.mes_account;document.getElementById('kes').innerText=u.kes_balance;document.getElementById('mes').innerText=u.mes_balance;document.getElementById('top_mes').innerText=u.mes_balance;document.getElementById('top_kes').innerText=u.kes_balance;if(u.blockchain_balance!==undefined)document.getElementById('chain_bal').innerText=u.blockchain_balance;loadOrders();loadMarket();loadChain();}async function signup(){let r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:document.getElementById('full_name').value,phone:document.getElementById('phone').value,password:document.getElementById('password').value})});let d=await r.json();if(d.error){document.getElementById('msg').innerText=d.error;return;}token=d.token;localStorage.setItem('mes_token',token);goToDashboard(d.user);}async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login_id:document.getElementById('login_id').value,password:document.getElementById('login_password').value})});let d=await r.json();if(d.error){document.getElementById('msg').innerText=d.error;return;}token=d.token;localStorage.setItem('mes_token',token);goToDashboard(d.user);}async function loadOrders(){let r=await fetch('/api/orders',{headers:{Authorization:'Bearer '+token}});let list=await r.json();let h='<tr><th>Type</th><th>Amt</th><th>Status</th><th>Action</th></tr>';list.forEach(o=>{let col=o.status==='COMPLETED'?'green':o.status==='MATCHED'?'orange':'gray';let btn=(o.status==='PENDING'||o.status==='MATCHED')?'<button onclick="cancelOrder(\\''+o.id+'\\')" style="background:red;padding:4px;width:auto;">Cancel</button>':'';h+='<tr><td>'+o.type+'</td><td>'+o.amount+'</td><td><span style="color:'+col+'">'+(o.status||'-')+'</span></td><td>'+btn+'</td></tr>'});document.getElementById('orders').innerHTML=h;}async function cancelOrder(id){if(!confirm('Cancel? MES will return if SELL'))return;let r=await fetch('/api/order/cancel/'+id,{method:'POST',headers:{Authorization:'Bearer '+token}});let d=await r.json();alert(d.message||d.error);let mr=await fetch('/api/me',{headers:{Authorization:'Bearer '+token}});if(mr.ok)goToDashboard(await mr.json());}async function loadMarket(){let r=await fetch('/api/market');let d=await r.json();let h='<b>BUY:</b><br>';d.buys.forEach(o=>{h+=o.amount+' MES wanted<br>'});h+='<br><b>SELL:</b><br>';d.sells.forEach(o=>{h+=o.amount+' MES ava
+  res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>MESCOIN P2P</title><style>body{font-family:system-ui;max-width:460px;margin:auto;padding:12px;background:#f0fdf4}input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box;font-size:15px}button{background:#16a34a;color:#fff;border:none;font-weight:bold;cursor:pointer}.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}h1{color:#16a34a;text-align:center}.order{background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:10px;margin:6px 0}</style></head><body><h1>MESCOIN P2P</h1><p style="text-align:center">1 MES = 2 KES | No MPESA popup | Direct contact</p><div class="card">My MES: <b id="top_mes">-</b> | KES: <b id="top_kes">-</b> | Chain: <b id="chain_len">-</b></div><div id="auth" class="card"><b>CREATE ACCOUNT</b><input id="full_name" placeholder="Full Name"><input id="phone" placeholder="Mobile 0768..."><input id="password" type="password" placeholder="Password"><button onclick="signup()">SIGN UP</button><hr><b>LOGIN</b><input id="login_id" placeholder="Mobile or MES"><input id="login_password" type="password" placeholder="Password"><button onclick="login()" style="background:#111">LOGIN</button><p id="msg" style="color:red"></p></div><div id="dash" style="display:none"><div class="card" style="background:#dcfce7"><b id="p_name"></b><br>Mobile: <span id="p_phone"></span><br>MES: <b id="acc" style="font-size:20px;color:#16a34a"></b><br><br>KES: <b id="kes"></b><br>MES: <b id="mes"></b><br>Chain: <b id="chain_bal"></b></div>
+
+<div class="card" style="border:2px solid #16a34a"><h3>BUY MES</h3><input id="buy_amt" type="number" placeholder="Amount e.g. 100"><button onclick="buyOrder()">POST BUY ORDER</button></div>
+<div class="card" style="border:2px solid #dc2626"><h3>SELL MES</h3><input id="sell_amt" type="number" placeholder="Amount e.g. 100"><button onclick="sellOrder()" style="background:#dc2626">POST SELL ORDER</button></div>
+
+<div class="card" style="border:2px solid #2563eb"><h3>🌍 LIVE P2P MARKET - All Users See This</h3>
+<b>BUY ORDERS (people who want MES - call them to sell):</b><div id="market_buys"></div><hr>
+<b>SELL ORDERS (people selling MES - call them to buy):</b><div id="market_sells"></div><br>
+<button onclick="loadMarket()" style="background:#2563eb">Refresh Market</button></div>
+
+<div class="card"><h3>My Orders</h3><table id="orders" style="width:100%;font-size:12px"></table></div>
+<div class="card"><h3>Blockchain</h3><div id="blockchain" style="font-size:11px;max-height:200px;overflow:auto;background:#111;color:#0f0;padding:8px;border-radius:8px"></div><button onclick="loadChain()" style="background:#333">Refresh Chain</button></div>
+<div class="card"><h3>Send MES Direct</h3><input id="to_account" placeholder="MES... or 07..."><input id="send_amt" type="number" placeholder="Amount"><button onclick="sendMes()" style="background:#2563eb">SEND NOW</button></div>
+<div class="card"><button onclick="logout()" style="background:#333">Logout</button></div>
+</div>
+<script>let token=localStorage.getItem('mes_token')||null;function goToDashboard(u){document.getElementById('auth').style.display='none';document.getElementById('dash').style.display='block';document.getElementById('p_name').innerText=u.full_name;document.getElementById('p_phone').innerText=u.phone;document.getElementById('acc').innerText=u.mes_account;document.getElementById('kes').innerText=u.kes_balance;document.getElementById('mes').innerText=u.mes_balance;document.getElementById('top_mes').innerText=u.mes_balance;document.getElementById('top_kes').innerText=u.kes_balance;if(u.blockchain_balance!==undefined)document.getElementById('chain_bal').innerText=u.blockchain_balance;loadOrders();loadMarket();loadChain();}async function signup(){let r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:document.getElementById('full_name').value,phone:document.getElementById('phone').value,password:document.getElementById('password').value})});let d=await r.json();if(d.error){document.getElementById('msg').innerText=d.error;return;}token=d.token;localStorage.setItem('mes_token',token);goToDashboard(d.user);}async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login_id:document.getElementById('login_id').value,password:document.getElementById('login_password').value})});let d=await r.json();if(d.error){document.getElementById('msg').innerText=d.error;return;}token=d.token;localStorage.setItem('mes_token',token);goToDashboard(d.user);}async function loadOrders(){let r=await fetch('/api/orders',{headers:{Authorization:'Bearer '+token}});let list=await r.json();let h='<tr><th>Type</th><th>Amt</th><th>Status</th><th>Action</th></tr>';list.forEach(o=>{let col=o.status==='COMPLETED'?'green':o.status==='MATCHED'?'orange':'gray';let btn='';if(o.status==='PENDING')btn='<button onclick="cancelOrder(\\''+o.id+'\\')" style="background:red;padding:4px;width:auto;">Cancel</button>';else if(o.status==='MATCHED')btn='<button onclick="completeOrder(\\''+o.id+'\\')" style="background:green;padding:4px;width:auto;">Complete</button>';h+='<tr><td>'+o.type+'</td><td>'+o.amount+'</td><td><span style="color:'+col+'">'+(o.status||'-')+'</span></td><td>'+btn+'</td></tr>'});document.getElementById('orders').innerHTML=h;}async function cancelOrder(id){if(!confirm('Cancel? MES will return if SELL'))return;let r=await fetch('/api/order/cancel/'+id,{method:'POST',headers:{Authorization:'Bearer '+token}});let d=await r.json();alert(d.message||d.error);loadMe();}async function completeOrder(id){if(!confirm('Have you received KES / sent MES offline? Complete trade?'))return;let r=await fetch('/api/order/complete/'+id,{method:'POST',headers:{Authorization:'Bearer '+token}});let d=await r.json();alert(d.message||d.error);loadMe();}async function loadMe(){let mr=await fetch('/api/me',{headers:{Authorization:'Bearer '+token}});if(mr.ok)goToDashboard(await mr.json());}async function loadMarket(){let r=await fetch('/api/market');let d=await r.json();let hb='';if(d.buys.length==0)hb='No buy orders';else d.buys.forEach(o=>{hb+='<div class="order"><b>'+o.full_name+'</b> WANTS '+o.amount+' MES (Pays '+(o.amount*2)+' KES)<br>Phone: <a href="tel:'+o.phone+'">'+o.phone+'</a><br>MES: '+o.mes_account+'<br><small>'+new Date(o.date).toLocaleString()+'</small></div>'});document.getElementById('market_buys').innerHTML=hb;let hs='';if(d.sells.length==0)hs='No sell orders';else d.sells.forEach(o=>{hs+='<div class="order"><b>'+o.full_name+'</b> SELLS '+o.amount+' MES (For '+(o.amount*2)+' KES)<br>Phone: <a href="tel:'+o.phone+'">'+o.phone+'</a><br>MES: '+o.mes_account+'<br><small>'+new Date(o.date).toLocaleString()+'</small></div>'});document.getElementById('market_sells').innerHTML=hs;}async function loadChain(){let r=await fetch('/api/blockchain');let d=await r.json();document.getElementById('chain_len').innerText=d.length;let h='Valid: '+d.valid+' | Blocks: '+d.length+'<br><br>';d.chain.forEach(b=>{h+='Block #'+b.index+' Hash:'+b.hash.slice(0,12)+'... Tx:'+b.transactions.length+'<br>';});document.getElementById('blockchain').innerHTML=h;}async function buyOrder(){let a=document.getElementById('buy_amt').value;let r=await fetch('/api/order/buy',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount:a})});let d=await r.json();alert(d.message||d.error);loadMe();loadMarket();}async function sellOrder(){let a=document.getElementById('sell_amt').value;let r=await fetch('/api/order/sell',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount:a})});let d=await r.json();alert(d.message||d.error);l
