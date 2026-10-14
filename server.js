@@ -86,7 +86,7 @@ let blockchain=db.blockchain||[createGenesisBlock()];
 function save(){ saveDB({users,orders,trades,blockchain}); }
 
 // ====== FOUNDER 100M - EDIT YOUR PHONE HERE ======
-const FOUNDER_PHONE = "0768000000"; // CHANGE THIS TO YOUR NUMBER e.g. "0768123456"
+const FOUNDER_PHONE = "254768871831"; // CHANGE THIS TO YOUR NUMBER e.g. "0768123456"
 const FOUNDER_AMOUNT = 100000000;
 function cleanPhone(p){ return (p||'').toString().replace(/\D/g,'').slice(-10); }
 // Auto-fund founder on startup if exists
