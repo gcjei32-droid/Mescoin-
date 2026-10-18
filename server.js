@@ -1,6 +1,5 @@
 const express = require('express');
 const fs = require('fs');
-const path = require('path');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -396,8 +395,20 @@ app.get('/api/chats', auth, (req, res) => {
 });
 
 // ---------------- WEB PAGE ----------------
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log('MESCOIN server running on port ' + PORT));
-  
+const PAGE = String.raw`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MESCOIN</title>
+<style>
+body{font-family:system-ui;max-width:430px;margin:auto;padding:12px;background:#f0fdf4}
+input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box;font-size:15px}
+button{background:#16a34a;color:#fff;border:none;font-weight:bold;cursor:pointer}
+button.sm{width:auto;padding:6px 10px;margin:4px 4px 0 0;font-size:12px;border-radius:8px}
+.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+h1{color:#16a34a;text-align:center;margin-bottom:0}
+.order{background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:10px;margin:6px 0}
+.badge{background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:12px;margin-left:6px}
+.chatrow{display:block;width:100%;text-align:left;background:#f8fafc;color:#111;border:1px solid #e2e8f0;font-weight:normal;font-size:13px;padding:10px;margin:5px 0}
+#chat_modal{display:none;position:f
