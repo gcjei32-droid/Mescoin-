@@ -1,30 +1,307 @@
-<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>MESCOIN P2P</title><style>body{font-family:system-ui;max-width:460px;margin:auto;padding:12px;background:#f0fdf4}input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box}button{background:#16a34a;color:#fff;border:none;font-weight:bold}.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}h1{color:#16a34a;text-align:center}.order{background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:10px;margin:6px 0}</style></head><body>
-<h1>MESCOIN P2P</h1><p style="text-align:center">1 MES = 2 KES | No MPESA popup | Direct contact</p>
-<div class="card">My MES: <b id="top_mes">-</b> | KES: <b id="top_kes">-</b></div>
-<div id="auth" class="card"><b>CREATE</b><input id="full_name" placeholder="Full Name"><input id="phone" placeholder="Mobile 0768..."><input id="password" type="password" placeholder="Password"><button onclick="signup()">SIGN UP</button><hr><b>LOGIN</b><input id="login_id" placeholder="Mobile or MES"><input id="login_password" type="password" placeholder="Password"><button onclick="login()" style="background:#111">LOGIN</button><p id="msg" style="color:red"></p></div>
-<div id="dash" style="display:none">
-<div class="card" style="background:#dcfce7"><b id="p_name"></b><br>Mobile: <span id="p_phone"></span><br>MES: <b id="acc"></b><br>KES: <b id="kes"></b><br>MES: <b id="mes"></b></div>
-<div class="card" style="border:2px solid #16a34a"><h3>BUY MES</h3><input id="buy_amt" type="number" placeholder="100"><button onclick="buyOrder()">POST BUY ORDER</button></div>
-<div class="card" style="border:2px solid #dc2626"><h3>SELL MES</h3><input id="sell_amt" type="number" placeholder="100"><button onclick="sellOrder()" style="background:#dc2626">POST SELL ORDER</button></div>
-<div class="card" style="border:2px solid #2563eb"><h3>LIVE MARKET - All Users See Phone + MES</h3><b>BUY ORDERS:</b><div id="market_buys"></div><hr><b>SELL ORDERS:</b><div id="market_sells"></div><br><button onclick="loadMarket()" style="background:#2563eb">Refresh Market</button></div>
-<div class="card"><h3>My Orders</h3><table id="orders" style="width:100%;font-size:12px"></table></div>
-<div class="card"><h3>Send MES</h3><input id="to_account" placeholder="MES... or 07..."><input id="send_amt" type="number" placeholder="Amount"><button onclick="sendMes()" style="background:#2563eb">SEND</button></div>
-<div class="card"><button onclick="logout()" style="background:#333">Logout</button></div>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MESCOIN</title>
+<style>
+body{font-family:system-ui;max-width:430px;margin:auto;padding:12px;background:#f0fdf4}
+input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box;font-size:15px}
+button{background:#16a34a;color:#fff;border:none;font-weight:bold;cursor:pointer}
+button.sm{width:auto;padding:6px 10px;margin:4px 4px 0 0;font-size:12px;border-radius:8px}
+.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+h1{color:#16a34a;text-align:center;margin-bottom:0}
+.order{background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:10px;margin:6px 0}
+.badge{background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:12px;margin-left:6px}
+.chatrow{display:block;width:100%;text-align:left;background:#f8fafc;color:#111;border:1px solid #e2e8f0;font-weight:normal;font-size:13px;padding:10px;margin:5px 0}
+#chat_modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50}
+#chat_box{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;height:80vh;background:#fff;border-radius:16px 16px 0 0;display:flex;flex-direction:column}
+#chat_head{padding:10px 14px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center}
+#chat_msgs{flex:1;overflow:auto;padding:10px}
+#chat_foot{display:flex;gap:6px;padding:8px;border-top:1px solid #eee}
+#chat_foot input{flex:1;width:auto;margin:0}
+#chat_foot button{width:80px;margin:0}
+.bub{max-width:80%;padding:8px 10px;border-radius:12px;margin:4px 0;font-size:14px;word-wrap:break-word;white-space:pre-wrap}
+.me{background:#16a34a;color:#fff;margin-left:auto}
+.them{background:#e5e7eb}
+.bub small{display:block;opacity:.7;font-size:10px;margin-top:2px}
+table{width:100%;font-size:12px}
+</style>
+</head>
+<body>
+<h1>MESCOIN P2P</h1>
+<p style="text-align:center">Price 2 KES per MES | Chat directly with buyers and sellers</p>
+<div class="card">My MES: <b id="top_mes">-</b> | KES: <b id="top_kes">-</b> | Chain: <b id="chain_len">-</b></div>
+
+<div id="auth" class="card">
+  <b>CREATE ACCOUNT</b>
+  <input id="full_name" placeholder="Full Name">
+  <input id="phone" placeholder="Mobile 0768...">
+  <input id="password" type="password" placeholder="Password">
+  <button onclick="signup()">SIGN UP</button>
+  <hr>
+  <b>LOGIN</b>
+  <input id="login_id" placeholder="Mobile or MES Account">
+  <input id="login_password" type="password" placeholder="Password">
+  <button onclick="login()" style="background:#111">LOGIN</button>
+  <p id="msg" style="color:red"></p>
 </div>
+
+<div id="dash" style="display:none">
+  <div class="card" style="background:#dcfce7">
+    <b id="p_name"></b><br>Mobile: <span id="p_phone"></span><br>
+    MES: <b id="acc" style="font-size:20px;color:#16a34a"></b><br><br>
+    KES: <b id="kes"></b><br>MES: <b id="mes"></b><br>Chain Bal: <b id="chain_bal"></b>
+  </div>
+
+  <div class="card" style="border:2px solid #7c3aed">
+    <h3 style="margin:0">Messages <span id="unread_badge"></span></h3>
+    <div id="chats"><small>No messages yet</small></div>
+  </div>
+
+  <div class="card" style="border:2px solid #2563eb">
+    <h3>LIVE P2P MARKET</h3>
+    <b>BUY ORDERS - people who WANT MES (message them to sell):</b>
+    <div id="market_buys"></div>
+    <hr>
+    <b>SELL ORDERS - people who HAVE MES (message them to buy):</b>
+    <div id="market_sells"></div>
+    <button onclick="loadMarket()" style="background:#2563eb">Refresh Market</button>
+  </div>
+
+  <div class="card" style="border:2px solid #16a34a">
+    <h3>BUY</h3>
+    <input id="buy_amt" type="number" placeholder="Amount of MES">
+    <button onclick="buyOrder()">POST BUY ORDER</button>
+  </div>
+
+  <div class="card" style="border:2px solid #dc2626">
+    <h3>SELL</h3>
+    <input id="sell_amt" type="number" placeholder="Amount of MES">
+    <button onclick="sellOrder()" style="background:#dc2626">POST SELL ORDER</button>
+  </div>
+
+  <div class="card">
+    <h3>Send MES</h3>
+    <input id="to_account" placeholder="Receiver MES... or 07...">
+    <input id="send_amt" type="number" placeholder="Amount">
+    <button onclick="sendMes()" style="background:#2563eb">SEND NOW</button>
+  </div>
+
+  <div class="card">
+    <h3>My Orders</h3>
+    <table id="orders"></table>
+  </div>
+
+  <div class="card">
+    <h3>Blockchain</h3>
+    <div id="blockchain" style="font-size:11px;max-height:200px;overflow:auto;background:#111;color:#0f0;padding:8px;border-radius:8px"></div>
+    <button onclick="loadChain()" style="background:#333">Refresh Chain</button>
+    <button onclick="logout()" style="background:#333">Logout</button>
+  </div>
+</div>
+
+<div id="chat_modal">
+  <div id="chat_box">
+    <div id="chat_head">
+      <div><b id="chat_title"></b><br><small id="chat_sub"></small></div>
+      <button class="sm" style="background:#333" onclick="closeChat()">Close</button>
+    </div>
+    <div id="chat_msgs"></div>
+    <div id="chat_foot">
+      <input id="chat_input" maxlength="500" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button onclick="sendChat()">Send</button>
+    </div>
+  </div>
+</div>
+
 <script>
-let token=localStorage.getItem("mes_token")||null;
-function goToDashboard(u){document.getElementById("auth").style.display="none";document.getElementById("dash").style.display="block";document.getElementById("p_name").innerText=u.full_name;document.getElementById("p_phone").innerText=u.phone;document.getElementById("acc").innerText=u.mes_account;document.getElementById("kes").innerText=u.kes_balance;document.getElementById("mes").innerText=u.mes_balance;document.getElementById("top_mes").innerText=u.mes_balance;document.getElementById("top_kes").innerText=u.kes_balance;loadOrders();loadMarket();}
-async function signup(){let r=await fetch("/api/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({full_name:full_name.value,phone:phone.value,password:password.value})});let d=await r.json();if(d.error){msg.innerText=d.error;return;}token=d.token;localStorage.setItem("mes_token",token);goToDashboard(d.user);}
-async function login(){let r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({login_id:login_id.value,password:login_password.value})});let d=await r.json();if(d.error){msg.innerText=d.error;return;}token=d.token;localStorage.setItem("mes_token",token);goToDashboard(d.user);}
-async function loadOrders(){let r=await fetch("/api/orders",{headers:{Authorization:"Bearer "+token}});let list=await r.json();let h="<tr><th>Type</th><th>Amt</th><th>Status</th><th>Action</th></tr>";list.forEach(o=>{let btn="";if(o.status==="PENDING")btn="<button onclick=\"cancelOrder('"+o.id+"')\" style=\"background:red;padding:4px;width:auto;\">Cancel</button>";else if(o.status==="MATCHED")btn="<button onclick=\"completeOrder('"+o.id+"')\" style=\"background:green;padding:4px;width:auto;\">Complete</button>";h+="<tr><td>"+o.type+"</td><td>"+o.amount+"</td><td>"+o.status+"</td><td>"+btn+"</td></tr>"});orders.innerHTML=h;}
-async function cancelOrder(id){if(!confirm("Cancel?"))return;let r=await fetch("/api/order/cancel/"+id,{method:"POST",headers:{Authorization:"Bearer "+token}});let d=await r.json();alert(d.message||d.error);loadMe();}
-async function completeOrder(id){if(!confirm("Received KES? Complete?"))return;let r=await fetch("/api/order/complete/"+id,{method:"POST",headers:{Authorization:"Bearer "+token}});let d=await r.json();alert(d.message||d.error);loadMe();}
-async function loadMe(){let mr=await fetch("/api/me",{headers:{Authorization:"Bearer "+token}});if(mr.ok)goToDashboard(await mr.json());}
-async function loadMarket(){let r=await fetch("/api/market");let d=await r.json();let hb="";if(d.buys.length==0)hb="No buy orders";else d.buys.forEach(o=>{hb+="<div class=order><b>"+o.full_name+"</b> WANTS "+o.amount+" MES (Pays "+(o.amount*2)+" KES)<br>Phone: <a href=tel:"+o.phone+">"+o.phone+"</a><br>MES: "+o.mes_account+"</div>"});market_buys.innerHTML=hb;let hs="";if(d.sells.length==0)hs="No sell orders";else d.sells.forEach(o=>{hs+="<div class=order><b>"+o.full_name+"</b> SELLS "+o.amount+" MES (For "+(o.amount*2)+" KES)<br>Phone: <a href=tel:"+o.phone+">"+o.phone+"</a><br>MES: "+o.mes_account+"</div>"});market_sells.innerHTML=hs;}
-async function buyOrder(){let a=buy_amt.value;let r=await fetch("/api/order/buy",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({amount:a})});let d=await r.json();alert(d.message||d.error);loadMe();loadMarket();}
-async function sellOrder(){let a=sell_amt.value;let r=await fetch("/api/order/sell",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({amount:a})});let d=await r.json();alert(d.message||d.error);loadMe();loadMarket();}
-async function sendMes(){let r=await fetch("/api/send",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({to_account:to_account.value,amount:send_amt.value})});let d=await r.json();alert(d.message||d.error);loadMe();}
-function logout(){localStorage.removeItem("mes_token");location.reload();}
-(async()=>{if(token){let r=await fetch("/api/me",{headers:{Authorization:"Bearer "+token}});if(r.ok)goToDashboard(await r.json());}loadMarket();})();
-setInterval(()=>{ if(token) loadMarket(); }, 5000);
-</script></body></html>
+let token = localStorage.getItem('mes_token') || null;
+let me = null, chat = null, chatTimer = null, pollTimer = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(url, method, body) {
+  const headers = {'Content-Type': 'application/json'};
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const r = await fetch(url, {method: method || 'GET', headers, body: body ? JSON.stringify(body) : undefined});
+  let d = {};
+  try { d = await r.json(); } catch (e) {}
+  if (r.status === 401 && token) { logout(); }
+  return d;
+}
+
+function showDash(u) {
+  me = u;
+  $('auth').style.display = 'none';
+  $('dash').style.display = 'block';
+  $('p_name').textContent = u.full_name;
+  $('p_phone').textContent = '0' + u.phone;
+  $('acc').textContent = u.mes_account;
+  $('kes').textContent = u.kes_balance;
+  $('mes').textContent = u.mes_balance;
+  $('top_mes').textContent = u.mes_balance;
+  $('top_kes').textContent = u.kes_balance;
+  if (u.blockchain_balance !== undefined) $('chain_bal').textContent = u.blockchain_balance;
+  loadOrders(); loadMarket(); loadChain(); loadChats();
+  clearInterval(pollTimer);
+  pollTimer = setInterval(loadChats, 10000);
+}
+async function refresh() {
+  const d = await api('/api/me');
+  if (d.error) return;
+  showDash(d);
+}
+function logout() {
+  localStorage.removeItem('mes_token');
+  token = null; me = null;
+  clearInterval(pollTimer); closeChat();
+  $('dash').style.display = 'none';
+  $('auth').style.display = 'block';
+}
+
+async function signup() {
+  const d = await api('/api/signup', 'POST', {full_name: $('full_name').value, phone: $('phone').value, password: $('password').value});
+  if (d.error) { $('msg').textContent = d.error; return; }
+  token = d.token; localStorage.setItem('mes_token', token); refresh();
+}
+async function login() {
+  const d = await api('/api/login', 'POST', {login_id: $('login_id').value, password: $('login_password').value});
+  if (d.error) { $('msg').textContent = d.error; return; }
+  token = d.token; localStorage.setItem('mes_token', token); refresh();
+}
+
+// ----- orders -----
+async function loadOrders() {
+  const list = await api('/api/orders');
+  if (!Array.isArray(list)) return;
+  let h = '<tr><th>Type</th><th>Amt</th><th>Status</th><th>Action</th></tr>';
+  list.forEach(o => {
+    const col = o.status === 'COMPLETED' ? 'green' : o.status === 'MATCHED' ? 'orange' : 'gray';
+    let btn = '';
+    if (o.status === 'PENDING') btn += '<button class="sm" style="background:#dc2626" data-act="cancel" data-id="' + esc(o.id) + '">Cancel</button>';
+    if (o.status === 'MATCHED') {
+      btn += '<button class="sm" style="background:#7c3aed" data-act="chat" data-order="' + esc(o.chat_order_id) + '" data-with="' + esc(o.chat_with || '') + '">Chat' + (o.counterparty ? ' ' + esc(o.counterparty.split(' ')[0]) : '') + '</button>';
+      if (o.type === 'SELL') btn += '<button class="sm" data-act="complete" data-id="' + esc(o.id) + '">Complete</button>';
+      btn += '<button class="sm" style="background:#dc2626" data-act="cancel" data-id="' + esc(o.id) + '">Cancel</button>';
+    }
+    h += '<tr><td>' + esc(o.type) + '</td><td>' + esc(o.amount) + '</td><td><span style="color:' + col + '">' + esc(o.status || '-') + '</span></td><td>' + btn + '</td></tr>';
+  });
+  $('orders').innerHTML = h;
+}
+async function cancelOrder(id) {
+  if (!confirm('Cancel order?')) return;
+  const d = await api('/api/order/cancel/' + id, 'POST');
+  alert(d.message || d.error); refresh();
+}
+async function completeOrder(id) {
+  if (!confirm('Confirm you have received the KES?')) return;
+  const d = await api('/api/order/complete/' + id, 'POST');
+  alert(d.message || d.error); refresh();
+}
+async function buyOrder() {
+  const d = await api('/api/order/buy', 'POST', {amount: $('buy_amt').value});
+  alert(d.message || d.error); refresh();
+}
+async function sellOrder() {
+  const d = await api('/api/order/sell', 'POST', {amount: $('sell_amt').value});
+  alert(d.message || d.error); refresh();
+}
+async function sendMes() {
+  const d = await api('/api/send', 'POST', {to_account: $('to_account').value, amount: $('send_amt').value});
+  alert(d.message || d.error); refresh();
+}
+
+// ----- market -----
+function orderCard(o, verb) {
+  const mine = me && o.user_id === me.id;
+  return '<div class="order"><b>' + esc(o.full_name) + '</b> ' + verb + ' ' + esc(o.amount) + ' MES<br>' +
+    (verb === 'WANTS' ? 'Pay: ' : 'For: ') + esc(o.kes) + ' KES<br>' +
+    'Phone: <a href="tel:0' + esc(o.phone) + '">0' + esc(o.phone) + '</a><br>MES: ' + esc(o.mes_account) +
+    '<br><small>' + esc(new Date(o.date).toLocaleString()) + '</small><br>' +
+    (mine ? '<small>Your order</small>' : '<button class="sm" style="background:#7c3aed" data-act="chat" data-order="' + esc(o.id) + '" data-with="">Message</button>') +
+    '</div>';
+}
+async function loadMarket() {
+  const d = await api('/api/market');
+  if (!d.buys) return;
+  $('market_buys').innerHTML = d.buys.length ? d.buys.map(o => orderCard(o, 'WANTS')).join('') : 'No buy orders';
+  $('market_sells').innerHTML = d.sells.length ? d.sells.map(o => orderCard(o, 'SELLS')).join('') : 'No sell orders';
+}
+
+// ----- blockchain -----
+async function loadChain() {
+  const r = await fetch('/api/blockchain');
+  const d = await r.json();
+  $('chain_len').textContent = d.length;
+  let h = 'Valid: ' + d.valid + ' | Blocks: ' + d.length + '<br><br>';
+  d.chain.forEach(b => { h += 'Block #' + b.index + ' Hash:' + b.hash.slice(0, 12) + '... Tx:' + b.transactions.length + '<br>'; });
+  $('blockchain').innerHTML = h;
+}
+
+// ----- chat inbox -----
+async function loadChats() {
+  const d = await api('/api/chats');
+  if (!d.chats) return;
+  $('unread_badge').innerHTML = d.unread ? '<span class="badge">' + d.unread + ' new</span>' : '';
+  if (!d.chats.length) { $('chats').innerHTML = '<small>No messages yet. Tap "Message" on any order in the market.</small>'; return; }
+  $('chats').innerHTML = d.chats.map(c =>
+    '<button class="chatrow" data-act="chat" data-order="' + esc(c.order_id) + '" data-with="' + esc(c.with) + '">' +
+    '<b>' + esc(c.with_name) + '</b>' + (c.unread ? '<span class="badge">' + c.unread + '</span>' : '') +
+    ' <small>(' + esc(c.order_type) + ' ' + esc(c.order_amount) + ' MES)</small><br>' + esc(c.last_text.slice(0, 60)) + '</button>'
+  ).join('');
+}
+
+// ----- chat window -----
+function openChat(orderId, withId) {
+  chat = {order: orderId, with: withId || ''};
+  $('chat_modal').style.display = 'block';
+  $('chat_msgs').innerHTML = 'Loading...';
+  loadThread(true);
+  clearInterval(chatTimer);
+  chatTimer = setInterval(() => loadThread(false), 4000);
+}
+function closeChat() {
+  chat = null;
+  clearInterval(chatTimer);
+  $('chat_modal').style.display = 'none';
+  if (token) loadChats();
+}
+async function loadThread(forceScroll) {
+  if (!chat) return;
+  const d = await api('/api/order/' + encodeURIComponent(chat.order) + '/messages' + (chat.with ? '?with=' + encodeURIComponent(chat.with) : ''));
+  if (!chat) return;
+  const box = $('chat_msgs');
+  if (d.error) { box.textContent = d.error; return; }
+  $('chat_title').textContent = d.other.full_name;
+  $('chat_sub').textContent = d.order.type + ' ' + d.order.amount + ' MES = ' + d.order.kes + ' KES (' + d.order.status + ')';
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  box.innerHTML = d.messages.length ? d.messages.map(m =>
+    '<div class="bub ' + (m.from_me ? 'me' : 'them') + '">' + esc(m.text) +
+    '<small>' + esc(new Date(m.date).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})) + '</small></div>'
+  ).join('') : '<small>Say hello about this order.</small>';
+  if (forceScroll || nearBottom) box.scrollTop = box.scrollHeight;
+}
+async function sendChat() {
+  const t = $('chat_input').value.trim();
+  if (!t || !chat) return;
+  $('chat_input').value = '';
+  const d = await api('/api/order/' + encodeURIComponent(chat.order) + '/messages', 'POST', {text: t, to: chat.with || undefined});
+  if (d.error) alert(d.error);
+  loadThread(true);
+}
+
+// ----- click handling -----
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'chat') openChat(b.dataset.order, b.dataset.with);
+  else if (act === 'cancel') cancelOrder(b.dataset.id);
+  else if (act === 'complete') completeOrder(b.dataset.id);
+});
+
+if (token) refresh();
+</script>
+</body>
+  </html>
