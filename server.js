@@ -1,17 +1,53 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const app = express();
+app.set('trust proxy', 1);
 app.use(cors());
-app.use(express.json({ limit: '20kb' }));
+app.use(express.json({ limit: '50kb' }));
 
-// Set JWT_SECRET in your host's environment variables. Fallback keeps old tokens working.
-const SECRET = process.env.JWT_SECRET || 'mescoin-secret-2026';
 const DB_FILE = fs.existsSync('/data') ? '/data/database.json' : './database.json';
 
-// ---------------- BLOCKCHAIN ----------------
+function loadSecret() {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  const f = path.join(path.dirname(DB_FILE), '.jwt_secret');
+  if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8').trim();
+  const s = crypto.randomBytes(48).toString('hex');
+  fs.writeFileSync(f, s, { mode: 0o600 });
+  return s;
+}
+const SECRET = loadSecret();
+const signToken = (id) => jwt.sign({ id }, SECRET, { expiresIn: '7d' });
+
+// --- HTML IN ONE FILE - NO BACKTICK INSIDE, SAFE ---
+const INDEX_HTML = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>MESCOIN P2P</title><style>body{font-family:system-ui;max-width:460px;margin:auto;padding:12px;background:#f0fdf4}input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box}button{background:#16a34a;color:#fff;border:none;font-weight:bold;cursor:pointer}.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}h1{color:#16a34a;text-align:center}.order{background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:10px;margin:6px 0}.chat{height:150px;overflow:auto;border:1px solid #ddd;padding:8px;border-radius:8px;background:#fff}</style></head><body><h1>MESCOIN P2P</h1><p style="text-align:center">1 MES = 2 KES | Chat to exchange</p><div class="card">My MES: <b id="top_mes">-</b> | Chain: <b id="chain_len">-</b></div><div id="auth" class="card"><b>CREATE</b><input id="full_name" placeholder="Full Name"><input id="phone" placeholder="Mobile 07..."><input id="password" type="password" placeholder="Password"><input id="founder_code" placeholder="Founder code if founder phone"><button onclick="signup()">SIGN UP</button><hr><b>LOGIN</b><input id="login_id" placeholder="Mobile or MES"><input id="login_password" type="password" placeholder="Password"><button onclick="login()" style="background:#111">LOGIN</button><p id="msg" style="color:red"></p></div><div id="dash" style="display:none"><div class="card" style="background:#dcfce7"><b id="p_name"></b><br>Mobile: <span id="p_phone"></span><br>MES: <b id="acc"></b><br>KES: <b id="kes"></b> | MES: <b id="mes"></b></div><div class="card" style="border:2px solid #2563eb"><h3>LIVE MARKET</h3><b>BUY ORDERS:</b><div id="market_buys"></div><hr><b>SELL ORDERS:</b><div id="market_sells"></div><button onclick="loadMarket()" style="background:#2563eb">Refresh</button></div><div class="card" style="border:2px solid #16a34a"><h3>BUY MES</h3><input id="buy_amt" type="number" placeholder="Amount"><button onclick="buyOrder()">POST BUY - No Popup</button></div><div class="card" style="border:2px solid #dc2626"><h3>SELL MES</h3><input id="sell_amt" type="number" placeholder="Amount"><button onclick="sellOrder()" style="background:#dc2626">POST SELL - No Popup</button></div><div class="card"><h3>My Orders - Chat Here</h3><table id="orders" style="width:100%;font-size:12px"></table><div id="chatBox" style="display:none"><h4>Chat</h4><div id="chatMsgs" class="chat"></div><input id="chatText" placeholder="Type message"><button onclick="sendChat()" style="background:#2563eb">Send</button></div></div><div class="card"><h3>Send MES Direct</h3><input id="to_account" placeholder="MES... or 07..."><input id="send_amt" type="number" placeholder="Amount"><button onclick="sendMes()" style="background:#2563eb">SEND</button></div><div class="card"><button onclick="logout()" style="background:#333">Logout</button></div></div><script>
+let token=localStorage.getItem('mes_token')||null;let currentChat=null;
+function goToDashboard(u){auth.style.display='none';dash.style.display='block';p_name.innerText=u.full_name;p_phone.innerText=u.phone;acc.innerText=u.mes_account;kes.innerText=u.kes_balance;mes.innerText=u.mes_balance;top_mes.innerText=u.mes_balance;loadOrders();loadMarket();}
+async function signup(){let r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:full_name.value,phone:phone.value,password:password.value,founder_code:founder_code.value})});let d=await r.json();if(d.error){msg.innerText=d.error;return;}token=d.token;localStorage.setItem('mes_token',token);goToDashboard(d.user);}
+async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login_id:login_id.value,password:login_password.value})});let d=await r.json();if(d.error){msg.innerText=d.error;return;}token=d.token;localStorage.setItem('mes_token',token);goToDashboard(d.user);}
+async function loadOrders(){let r=await fetch('/api/orders',{headers:{Authorization:'Bearer '+token}});let list=await r.json();let h='<tr><th>Type</th><th>Amt</th><th>Status</th><th>Action</th></tr>';list.forEach(function(o){let btn='';if(o.status==='PENDING')btn='<button onclick="cancelOrder(\\''+o.id+'\\')" style="background:red;padding:3px;width:auto;font-size:11px">Cancel</button>';else if(o.status==='MATCHED')btn='<button onclick="openChat(\\''+(o.chat_order_id||o.id)+'\\')" style="background:#2563eb;padding:3px;width:auto;font-size:11px">Chat</button> <button onclick="markPaid(\\''+o.id+'\\')" style="background:orange;padding:3px;width:auto;font-size:11px">I Paid</button> <button onclick="completeOrder(\\''+o.id+'\\')" style="background:green;padding:3px;width:auto;font-size:11px">Complete</button> <button onclick="disputeOrder(\\''+o.id+'\\')" style="background:#333;padding:3px;width:auto;font-size:11px">Dispute</button>';else if(o.status==='DISPUTED')btn='Disputed';h+='<tr><td>'+o.type+'</td><td>'+o.amount+'</td><td>'+o.status+'</td><td>'+btn+'</td></tr>';});orders.innerHTML=h;}
+async function cancelOrder(id){let r=await fetch('/api/order/cancel/'+id,{method:'POST',headers:{Authorization:'Bearer '+token}});let d=await r.json();alert(d.message||d.error);loadOrders();}
+async function markPaid(id){let r=await fetch('/api/order/paid/'+id,{method:'POST',headers:{Authorization:'Bearer '+token}});let d=await r.json();alert(d.message||d.error);loadOrders();}
+async function completeOrder(id){let r=await fetch('/api/order/complete/'+id,{method:'POST',headers:{Authorization:'Bearer '+token}});let d=await r.json();alert(d.message||d.error);loadOrders();}
+async function disputeOrder(id){if(!confirm('Open dispute?'))return;let r=await fetch('/api/order/dispute/'+id,{method:'POST',headers:{Authorization:'Bearer '+token}});let d=await r.json();alert(d.message||d.error);loadOrders();}
+async function openChat(id){currentChat=id;chatBox.style.display='block';loadChat();}
+async function loadChat(){if(!currentChat)return;let r=await fetch('/api/chat/'+currentChat,{headers:{Authorization:'Bearer '+token}});let list=await r.json();let h='';list.forEach(function(m){h+='<div><b>'+m.name+':</b> '+m.text+'</div>';});chatMsgs.innerHTML=h;chatMsgs.scrollTop=chatMsgs.scrollHeight;}
+async function sendChat(){let t=chatText.value;let r=await fetch('/api/chat/'+currentChat,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({text:t})});chatText.value='';loadChat();}
+async function loadMarket(){let r=await fetch('/api/market',{headers:{Authorization:'Bearer '+token}});let d=await r.json();let hb='';if(d.buys.length==0)hb='No buys';else d.buys.forEach(function(o){hb+='<div class="order"><b>'+o.full_name+'</b> WANTS '+o.amount+' MES ('+o.kes+' KES)</div>';});market_buys.innerHTML=hb;let hs='';if(d.sells.length==0)hs='No sells';else d.sells.forEach(function(o){hs+='<div class="order"><b>'+o.full_name+'</b> SELLS '+o.amount+' MES ('+o.kes+' KES)</div>';});market_sells.innerHTML=hs;}
+async function buyOrder(){let r=await fetch('/api/order/buy',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount:buy_amt.value})});let d=await r.json();alert(d.message||d.error);loadOrders();loadMarket();}
+async function sellOrder(){let r=await fetch('/api/order/sell',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({amount:sell_amt.value})});let d=await r.json();alert(d.message||d.error);loadOrders();loadMarket();}
+async function sendMes(){let r=await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({to_account:to_account.value,amount:send_amt.value})});let d=await r.json();alert(d.message||d.error);location.reload();}
+function logout(){localStorage.removeItem('mes_token');location.reload();}
+(async()=>{if(token){let r=await fetch('/api/me',{headers:{Authorization:'Bearer '+token}});if(r.ok)goToDashboard(await r.json());}})();
+setInterval(function(){if(token&&currentChat)loadChat();if(token)loadMarket();},4000);
+</script></body></html>`;
+
+// Write index.html so / works even if file missing
+try { fs.writeFileSync(path.join(__dirname,'index.html'), INDEX_HTML); } catch(e){}
+
 function calculateHash(prev_hash, timestamp, transactions, nonce) {
   return crypto.createHash('sha256').update(prev_hash + timestamp + JSON.stringify(transactions) + nonce).digest('hex');
 }
@@ -31,21 +67,8 @@ function mineBlock(transactions) {
   let prev_hash = prevBlock.hash;
   let nonce = 0;
   let hash = '';
-  do {
-    nonce++;
-    hash = calculateHash(prev_hash, timestamp, transactions, nonce);
-  } while (!hash.startsWith('00'));
+  do { nonce++; hash = calculateHash(prev_hash, timestamp, transactions, nonce); } while (!hash.startsWith('00'));
   return { index, prev_hash, timestamp, transactions, nonce, hash };
-}
-function isChainValid(chain) {
-  for (let i = 1; i < chain.length; i++) {
-    let curr = chain[i];
-    let prev = chain[i - 1];
-    if (curr.prev_hash !== prev.hash) return false;
-    if (curr.hash !== calculateHash(curr.prev_hash, curr.timestamp, curr.transactions, curr.nonce)) return false;
-    if (!curr.hash.startsWith('00')) return false;
-  }
-  return true;
 }
 function getBalanceFromChain(mes_account) {
   let balance = 0;
@@ -64,8 +87,6 @@ function addToBlockchain(transactions) {
   save();
   return newBlock;
 }
-
-// ---------------- DATABASE ----------------
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, JSON.stringify({ users: [], orders: [], trades: [], messages: [], blockchain: [createGenesisBlock()] }));
@@ -74,7 +95,11 @@ function loadDB() {
   if (!raw.blockchain || raw.blockchain.length === 0) raw.blockchain = [createGenesisBlock()];
   return raw;
 }
-function saveDB(d) { fs.writeFileSync(DB_FILE, JSON.stringify(d, null, 2)); }
+function saveDB(d) {
+  const tmp = DB_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(d, null, 2));
+  fs.renameSync(tmp, DB_FILE);
+}
 let db = loadDB();
 let users = db.users || [];
 let orders = db.orders || [];
@@ -83,12 +108,13 @@ let messages = db.messages || [];
 let blockchain = db.blockchain || [createGenesisBlock()];
 function save() { saveDB({ users, orders, trades, messages, blockchain }); }
 
-// ---------------- HELPERS ----------------
 const FOUNDER_PHONE = '254768871831';
 const FOUNDER_AMOUNT = 100000000;
-// last 9 digits, so 0768..., 768... and 254768... all match each other
+const FOUNDER_CODE = process.env.FOUNDER_CODE || '';
+const ADMIN_PHONE = process.env.ADMIN_PHONE || FOUNDER_PHONE;
 function cleanPhone(p) { return (p || '').toString().replace(/\D/g, '').slice(-9); }
-
+const isFounderPhone = (p) => cleanPhone(p) === cleanPhone(FOUNDER_PHONE);
+const newId = () => crypto.randomUUID();
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16).toString('hex');
   return 'scrypt$' + salt + '$' + crypto.scryptSync(String(pw), salt, 32).toString('hex');
@@ -96,29 +122,45 @@ function hashPassword(pw) {
 function checkPassword(user, pw) {
   const s = user.password || '';
   if (s.startsWith('scrypt$')) {
-    const [, salt, h] = s.split('$');
-    return crypto.timingSafeEqual(crypto.scryptSync(String(pw), salt, 32), Buffer.from(h, 'hex'));
+    const parts = s.split('$');
+    const salt = parts[1]; const h = parts[2];
+    const a = crypto.scryptSync(String(pw), salt, 32);
+    const b = Buffer.from(h, 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
-  // old plain-text account: accept once, then upgrade to a hash
   if (s === pw) { user.password = hashPassword(pw); save(); return true; }
   return false;
 }
 function safe(u) { const { password, ...rest } = u; return rest; }
+function validAmount(a) { return Number.isFinite(a) && a > 0 && a <= 1e9; }
+function rateLimit(name, max, windowMs) {
+  const hits = {};
+  return (req, res, next) => {
+    const key = name + '|' + req.ip;
+    const now = Date.now();
+    hits[key] = (hits[key] || []).filter(t => now - t < windowMs);
+    if (hits[key].length >= max) return res.status(429).json({ error: 'Too many attempts' });
+    hits[key].push(now);
+    next();
+  };
+}
+const loginLimiter = rateLimit('login', 20, 15 * 60 * 1000);
+const signupLimiter = rateLimit('signup', 10, 60 * 60 * 1000);
 
-(function fundFounderOnBoot() {
+function founderAlreadyFunded(acc) {
+  return blockchain.some(b => b.transactions.some(tx => tx.to === acc && tx.from === 'GENESIS_BANK_100M'));
+}
+function fundFounder(founder) {
+  if (founderAlreadyFunded(founder.mes_account)) return;
+  founder.mes_balance += FOUNDER_AMOUNT;
+  blockchain.push(mineBlock([{ from: 'GENESIS_BANK_100M', to: founder.mes_account, amount: FOUNDER_AMOUNT, note: 'Founder 100M' }]));
+  save();
+}
+(function boot() {
   try {
-    let founder = users.find(u => cleanPhone(u.phone) === cleanPhone(FOUNDER_PHONE));
-    if (founder) {
-      let already = blockchain.some(b => b.transactions.some(tx => tx.to === founder.mes_account && tx.from === 'GENESIS_BANK_100M'));
-      if (!already) {
-        founder.mes_balance = FOUNDER_AMOUNT;
-        let block = mineBlock([{ from: 'GENESIS_BANK_100M', to: founder.mes_account, amount: FOUNDER_AMOUNT, note: 'Founder 100M allocation' }]);
-        blockchain.push(block);
-        save();
-        console.log('FOUNDER 100M FUNDED: ' + founder.mes_account);
-      }
-    }
-  } catch (e) { console.log('Founder boot error', e.message); }
+    let founder = users.find(u => isFounderPhone(u.phone));
+    if (founder) fundFounder(founder);
+  } catch (e) { console.log('Boot error', e.message); }
 })();
 
 function auth(req, res, next) {
@@ -130,75 +172,70 @@ function auth(req, res, next) {
     next();
   } catch { return res.status(401).json({ error: 'Invalid token' }); }
 }
+function adminOnly(req, res, next) {
+  if (cleanPhone(req.user.phone) !== cleanPhone(ADMIN_PHONE)) return res.status(403).json({ error: 'Admin only' });
+  next();
+}
+function canSpend(user, amount) {
+  return user.mes_balance >= amount;
+}
+function pairOf(o) { return o.matchedWith ? orders.find(x => String(x.id) === String(o.matchedWith)) : null; }
 
-// ---------------- PUBLIC ----------------
 app.get('/api/price', (req, res) => res.json({ price: 2 }));
 app.get('/api/blockchain', (req, res) => {
-  res.json({ length: blockchain.length, valid: isChainValid(blockchain), chain: blockchain.slice(-10).reverse() });
-});
-app.get('/api/blockchain/balance/:account', (req, res) => {
-  let bal = getBalanceFromChain(req.params.account);
-  res.json({ account: req.params.account, blockchain_balance: bal, chain_length: blockchain.length });
+  res.json({ length: blockchain.length, chain: blockchain.slice(-10).reverse() });
 });
 
-// ---------------- ACCOUNTS ----------------
-app.post('/api/signup', (req, res) => {
-  let { full_name, phone, password } = req.body || {};
+app.post('/api/signup', signupLimiter, (req, res) => {
+  let { full_name, phone, password, founder_code } = req.body || {};
   if (!full_name || !phone || !password) return res.status(400).json({ error: 'All required' });
   let cp = cleanPhone(phone);
-  if (cp.length < 9) return res.status(400).json({ error: 'Enter a valid mobile number' });
-  if (String(password).length < 4) return res.status(400).json({ error: 'Password too short' });
-  if (users.find(u => cleanPhone(u.phone) === cp)) return res.status(400).json({ error: 'Mobile already registered - click LOGIN' });
+  if (cp.length < 9) return res.status(400).json({ error: 'Enter valid mobile' });
+  if (String(password).length < 6) return res.status(400).json({ error: 'Password min 6 chars' });
+  if (users.find(u => cleanPhone(u.phone) === cp)) return res.status(400).json({ error: 'Mobile already registered - LOGIN' });
+  const founder = isFounderPhone(cp);
+  if (founder && (!FOUNDER_CODE || founder_code !== FOUNDER_CODE)) {
+    return res.status(403).json({ error: 'This number is reserved - need founder code' });
+  }
   let user = {
-    id: Date.now().toString(),
+    id: newId(),
     full_name: String(full_name).trim().slice(0, 60),
     phone: cp,
     password: hashPassword(password),
-    mes_account: 'MES' + Math.floor(100000 + Math.random() * 900000),
+    mes_account: 'MES' + crypto.randomInt(100000, 1000000),
     kes_balance: 0,
     mes_balance: 0
   };
-  if (cp === cleanPhone(FOUNDER_PHONE)) user.mes_balance = FOUNDER_AMOUNT;
+  while (users.some(u => u.mes_account === user.mes_account)) user.mes_account = 'MES' + crypto.randomInt(100000, 1000000);
   users.push(user);
-  if (user.mes_balance === FOUNDER_AMOUNT) {
-    blockchain.push(mineBlock([{ from: 'GENESIS_BANK_100M', to: user.mes_account, amount: FOUNDER_AMOUNT, note: 'Founder 100M on signup' }]));
-  } else {
-    addToBlockchain([{ from: 'GENESIS', to: user.mes_account, amount: 0, note: 'Account created ' + user.full_name }]);
-  }
+  if (founder) fundFounder(user);
+  else addToBlockchain([{ from: 'GENESIS', to: user.mes_account, amount: 0, note: 'Account created ' + user.full_name }]);
   save();
-  let token = jwt.sign({ id: user.id }, SECRET);
-  res.json({ token, user: safe(user) });
+  res.json({ token: signToken(user.id), user: safe(user) });
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', loginLimiter, (req, res) => {
   let { login_id, password } = req.body || {};
   if (!login_id || !password) return res.status(400).json({ error: 'All required' });
   let cp = cleanPhone(login_id);
   let up = String(login_id).trim().toUpperCase();
   let u = users.find(x => (cp.length >= 9 && cleanPhone(x.phone) === cp) || x.mes_account.toUpperCase() === up);
-  if (!u) return res.status(400).json({ error: 'Account not found' });
-  if (!checkPassword(u, password)) return res.status(400).json({ error: 'Wrong password' });
-  let token = jwt.sign({ id: u.id }, SECRET);
-  res.json({ token, user: safe(u) });
+  if (!u || !checkPassword(u, password)) return res.status(400).json({ error: 'Wrong account or password' });
+  res.json({ token: signToken(u.id), user: safe(u) });
 });
 
 app.get('/api/me', auth, (req, res) => {
   res.json({ ...safe(req.user), blockchain_balance: getBalanceFromChain(req.user.mes_account) });
 });
 
-// ---------------- ORDERS ----------------
 app.get('/api/orders', auth, (req, res) => {
   let list = orders.filter(o => o.userId === req.user.id).slice(-20).reverse().map(o => {
     let out = { ...o };
-    // For matched trades both people chat on the SELL order so they share one thread
-    if (o.status === 'MATCHED' && o.matchedWith) {
-      let pair = orders.find(x => x.id == o.matchedWith);
+    if ((o.status === 'MATCHED' || o.status === 'DISPUTED') && o.matchedWith) {
+      let pair = orders.find(x => String(x.id) === String(o.matchedWith));
       if (pair) {
         let sell = o.type === 'SELL' ? o : pair;
         out.chat_order_id = sell.id;
-        out.chat_with = o.type === 'SELL' ? pair.userId : null; // buyer talks to order owner (seller)
-        let cp = users.find(u => u.id === pair.userId);
-        out.counterparty = cp ? cp.full_name : '';
       }
     }
     return out;
@@ -206,36 +243,29 @@ app.get('/api/orders', auth, (req, res) => {
   res.json(list);
 });
 
-app.get('/api/market', (req, res) => {
+app.get('/api/market', auth, (req, res) => {
   function enrich(o) {
     let u = users.find(x => x.id === o.userId);
-    return {
-      id: o.id, type: o.type, amount: o.amount, status: o.status, date: o.date,
-      user_id: o.userId,
-      full_name: u ? u.full_name : 'Unknown',
-      phone: u ? cleanPhone(u.phone) : '',
-      mes_account: u ? u.mes_account : '',
-      kes: o.amount * 2
-    };
+    return { id: o.id, type: o.type, amount: o.amount, status: o.status, date: o.date, full_name: u ? u.full_name : 'Unknown', kes: o.amount * 2 };
   }
   res.json({
     buys: orders.filter(o => o.type === 'BUY' && o.status === 'PENDING').map(enrich).slice(-30).reverse(),
-    sells: orders.filter(o => o.type === 'SELL' && o.status === 'PENDING').map(enrich).slice(-30).reverse(),
-    matched: orders.filter(o => o.status === 'MATCHED').map(enrich).slice(-20).reverse()
+    sells: orders.filter(o => o.type === 'SELL' && o.status === 'PENDING').map(enrich).slice(-30).reverse()
   });
 });
 
-// Cancel: any locked MES goes back to the seller, whoever cancels
 app.post('/api/order/cancel/:id', auth, (req, res) => {
-  let o = orders.find(x => x.id == req.params.id && x.userId === req.user.id);
+  let o = orders.find(x => String(x.id) === req.params.id && x.userId === req.user.id);
   if (!o) return res.status(404).json({ error: 'Order not found' });
-  if (o.type !== 'BUY' && o.type !== 'SELL') return res.status(400).json({ error: 'Cannot cancel this' });
-  if (o.status !== 'PENDING' && o.status !== 'MATCHED') return res.status(400).json({ error: 'Order already ' + o.status });
-  let toCancel = [o];
-  if (o.matchedWith) {
-    let other = orders.find(x => x.id == o.matchedWith);
-    if (other && other.status === 'MATCHED') toCancel.push(other);
+  if (o.type !== 'BUY' && o.type !== 'SELL') return res.status(400).json({ error: 'Cannot cancel' });
+  if (o.status !== 'PENDING' && o.status !== 'MATCHED') return res.status(400).json({ error: 'Already ' + o.status });
+  let pair = pairOf(o);
+  if (o.status === 'MATCHED') {
+    if (o.paid || (pair && pair.paid)) return res.status(400).json({ error: 'Payment marked as sent - complete or dispute' });
+    if (o.type === 'SELL') return res.status(400).json({ error: 'Buyer must cancel matched trade' });
   }
+  let toCancel = [o];
+  if (pair && pair.status === 'MATCHED') toCancel.push(pair);
   for (let x of toCancel) {
     if (x.type === 'SELL') {
       let owner = users.find(u => u.id === x.userId);
@@ -244,171 +274,29 @@ app.post('/api/order/cancel/:id', auth, (req, res) => {
     x.status = 'CANCELLED';
   }
   save();
-  res.json({ message: 'Order cancelled. Locked MES returned to the seller.', user: safe(req.user) });
+  res.json({ message: 'Cancelled', user: safe(req.user) });
 });
 
-// Only the SELLER can release MES (after receiving the KES), so a buyer cannot release it early
-app.post('/api/order/complete/:id', auth, (req, res) => {
-  let sellOrder = orders.find(o => o.id == req.params.id && o.userId === req.user.id && o.type === 'SELL');
-  if (!sellOrder) return res.status(403).json({ error: 'Only the seller can complete the trade' });
-  if (sellOrder.status !== 'MATCHED') return res.status(400).json({ error: 'Not matched yet' });
-  let buyOrder = orders.find(o => o.id == sellOrder.matchedWith);
-  if (!buyOrder) return res.status(400).json({ error: 'Pair not found' });
-  let seller = req.user;
-  let buyer = users.find(u => u.id === buyOrder.userId);
-  if (!buyer) return res.status(400).json({ error: 'Buyer not found' });
-  sellOrder.status = 'COMPLETED';
-  buyOrder.status = 'COMPLETED';
-  buyer.mes_balance += sellOrder.amount;
-  seller.kes_balance += sellOrder.amount * 2;
-  trades.push({ id: Date.now(), amount: sellOrder.amount, kes: sellOrder.amount * 2, date: new Date() });
-  addToBlockchain([{ from: seller.mes_account, to: buyer.mes_account, amount: sellOrder.amount, kes: sellOrder.amount * 2, note: 'P2P TRADE ' + sellOrder.id }]);
-  res.json({ message: 'Trade completed! MES released to buyer', user: safe(req.user) });
-});
-
-app.post('/api/order/buy', auth, (req, res) => {
-  let amount = parseFloat(req.body && req.body.amount);
-  if (!(amount > 0)) return res.status(400).json({ error: 'Enter amount' });
-  let sellMatch = orders.find(o => o.type === 'SELL' && o.status === 'PENDING' && o.userId !== req.user.id && o.amount === amount);
-  let buyOrder = { id: Date.now().toString(), userId: req.user.id, type: 'BUY', amount, price: 2, status: sellMatch ? 'MATCHED' : 'PENDING', matchedWith: sellMatch ? sellMatch.id : null, date: new Date() };
-  orders.push(buyOrder);
-  if (sellMatch) { sellMatch.status = 'MATCHED'; sellMatch.matchedWith = buyOrder.id; }
+app.post('/api/order/paid/:id', auth, (req, res) => {
+  let buy = orders.find(o => String(o.id) === req.params.id && o.userId === req.user.id && o.type === 'BUY');
+  if (!buy) return res.status(403).json({ error: 'Only buyer can mark paid' });
+  if (buy.status !== 'MATCHED') return res.status(400).json({ error: 'Not matched' });
+  let sell = pairOf(buy);
+  if (!sell) return res.status(400).json({ error: 'Pair not found' });
+  buy.paid = true; sell.paid = true;
   save();
-  if (sellMatch) {
-    let seller = users.find(u => u.id === sellMatch.userId);
-    return res.json({ message: 'MATCHED with ' + seller.full_name + '! Open the chat from "My Orders", send ' + (amount * 2) + ' KES by normal M-Pesa, then wait for the seller to confirm.', user: safe(req.user) });
-  }
-  res.json({ message: 'Buy order saved - visible to all sellers. They can message you.', user: safe(req.user) });
+  res.json({ message: 'Marked as paid - seller can now release MES' });
 });
 
-app.post('/api/order/sell', auth, (req, res) => {
-  let amount = parseFloat(req.body && req.body.amount);
-  if (!(amount > 0)) return res.status(400).json({ error: 'Enter amount' });
-  if (req.user.mes_balance < amount) return res.status(400).json({ error: 'Not enough MES' });
-  let buyMatch = orders.find(o => o.type === 'BUY' && o.status === 'PENDING' && o.userId !== req.user.id && o.amount === amount);
-  req.user.mes_balance -= amount;
-  let sellOrder = { id: Date.now().toString(), userId: req.user.id, type: 'SELL', amount, price: 2, status: buyMatch ? 'MATCHED' : 'PENDING', matchedWith: buyMatch ? buyMatch.id : null, date: new Date() };
-  orders.push(sellOrder);
-  if (buyMatch) { buyMatch.status = 'MATCHED'; buyMatch.matchedWith = sellOrder.id; }
+app.post('/api/order/dispute/:id', auth, (req, res) => {
+  let o = orders.find(x => String(x.id) === req.params.id && x.userId === req.user.id);
+  if (!o) return res.status(404).json({ error: 'Order not found' });
+  if (o.status !== 'MATCHED') return res.status(400).json({ error: 'Only matched can be disputed' });
+  let pair = pairOf(o);
+  if (!pair) return res.status(400).json({ error: 'Pair not found' });
+  o.status = 'DISPUTED'; pair.status = 'DISPUTED';
   save();
-  if (buyMatch) {
-    let buyer = users.find(u => u.id === buyMatch.userId);
-    return res.json({ message: 'MATCHED with ' + buyer.full_name + '! Chat with them from "My Orders". When their KES arrives, click Complete.', user: safe(req.user) });
-  }
-  res.json({ message: 'Sell order saved, MES locked. Buyers can message you.', user: safe(req.user) });
+  res.json({ message: 'Dispute opened' });
 });
 
-app.post('/api/send', auth, (req, res) => {
-  let { to_account } = req.body || {};
-  let amount = parseFloat(req.body && req.body.amount);
-  if (!to_account) return res.status(400).json({ error: 'Enter receiver' });
-  if (!(amount > 0)) return res.status(400).json({ error: 'Enter amount' });
-  to_account = String(to_account).trim().toUpperCase();
-  if (req.user.mes_balance < amount) return res.status(400).json({ error: 'Not enough MES' });
-  let cp = cleanPhone(to_account);
-  let receiver = users.find(u => u.mes_account.toUpperCase() === to_account || (cp.length >= 9 && cleanPhone(u.phone) === cp));
-  if (!receiver) return res.status(400).json({ error: 'Receiver not found - use MES account or phone' });
-  if (receiver.id === req.user.id) return res.status(400).json({ error: 'Cannot send to self' });
-  req.user.mes_balance -= amount;
-  receiver.mes_balance += amount;
-  orders.push({ id: Date.now(), userId: req.user.id, type: 'SEND', amount, to_account: receiver.mes_account, date: new Date() });
-  addToBlockchain([{ from: req.user.mes_account, to: receiver.mes_account, amount, note: 'Direct SEND' }]);
-  res.json({ message: 'Sent ' + amount + ' to ' + receiver.mes_account, user: safe(req.user) });
-});
-
-// ---------------- ORDER CHAT ----------------
-// A private thread exists between the order owner and each person who messages that order.
-const chatHits = {};
-function chatLimited(uid) {
-  const now = Date.now();
-  chatHits[uid] = (chatHits[uid] || []).filter(t => now - t < 60000);
-  if (chatHits[uid].length >= 20) return true;
-  chatHits[uid].push(now);
-  return false;
-}
-function findChatOrder(id) {
-  return orders.find(o => String(o.id) === String(id) && (o.type === 'BUY' || o.type === 'SELL'));
-}
-
-// Send a message about an order
-app.post('/api/order/:id/messages', auth, (req, res) => {
-  const order = findChatOrder(req.params.id);
-  if (!order) return res.status(404).json({ error: 'Order not found' });
-  if (order.status === 'CANCELLED' || order.status === 'COMPLETED') return res.status(400).json({ error: 'This order is closed' });
-  const text = String((req.body && req.body.text) || '').trim().slice(0, 500);
-  if (!text) return res.status(400).json({ error: 'Type a message' });
-
-  let toId;
-  if (order.userId === req.user.id) {
-    // owner replying: must name someone who already messaged this order
-    toId = req.body.to;
-    if (!toId || !messages.some(m => m.orderId === String(order.id) && m.from === toId && m.to === req.user.id))
-      return res.status(403).json({ error: 'You can only reply to people who messaged you' });
-  } else {
-    toId = order.userId;
-  }
-  if (chatLimited(req.user.id)) return res.status(429).json({ error: 'Slow down - too many messages' });
-
-  const m = { id: crypto.randomUUID(), orderId: String(order.id), from: req.user.id, to: toId, text, date: new Date().toISOString(), read: false };
-  messages.push(m);
-  save();
-  res.json({ ok: true, message: { id: m.id, from_me: true, text: m.text, date: m.date } });
-});
-
-// Read the conversation about an order (owner passes ?with=<userId>)
-app.get('/api/order/:id/messages', auth, (req, res) => {
-  const order = findChatOrder(req.params.id);
-  if (!order) return res.status(404).json({ error: 'Order not found' });
-  const other = order.userId === req.user.id ? req.query.with : order.userId;
-  if (!other) return res.status(400).json({ error: 'Choose who to chat with' });
-  const thread = messages.filter(m => m.orderId === String(order.id) &&
-    ((m.from === req.user.id && m.to === other) || (m.from === other && m.to === req.user.id)));
-  let changed = false;
-  thread.forEach(m => { if (m.to === req.user.id && !m.read) { m.read = true; changed = true; } });
-  if (changed) save();
-  const ou = users.find(u => u.id === other);
-  res.json({
-    order: { id: order.id, type: order.type, amount: order.amount, kes: order.amount * 2, status: order.status },
-    other: { id: other, full_name: ou ? ou.full_name : 'Unknown' },
-    messages: thread.slice(-200).map(m => ({ id: m.id, from_me: m.from === req.user.id, text: m.text, date: m.date }))
-  });
-});
-
-// Inbox: all my conversations with unread counts
-app.get('/api/chats', auth, (req, res) => {
-  const map = {};
-  for (const m of messages) {
-    if (m.from !== req.user.id && m.to !== req.user.id) continue;
-    const other = m.from === req.user.id ? m.to : m.from;
-    const key = m.orderId + '|' + other;
-    const c = map[key] || (map[key] = { order_id: m.orderId, with: other, last_text: '', last_date: '', unread: 0 });
-    c.last_text = m.text;
-    c.last_date = m.date;
-    if (m.to === req.user.id && !m.read) c.unread++;
-  }
-  const list = Object.values(map).map(c => {
-    const o = orders.find(x => String(x.id) === c.order_id);
-    const u = users.find(x => x.id === c.with);
-    return { ...c, with_name: u ? u.full_name : 'Unknown', order_type: o ? o.type : '', order_amount: o ? o.amount : 0, order_status: o ? o.status : '' };
-  }).sort((a, b) => b.last_date.localeCompare(a.last_date)).slice(0, 50);
-  res.json({ unread: list.reduce((s, c) => s + c.unread, 0), chats: list });
-});
-
-// ---------------- WEB PAGE ----------------
-const PAGE = String.raw`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MESCOIN</title>
-<style>
-body{font-family:system-ui;max-width:430px;margin:auto;padding:12px;background:#f0fdf4}
-input,button{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid #ddd;box-sizing:border-box;font-size:15px}
-button{background:#16a34a;color:#fff;border:none;font-weight:bold;cursor:pointer}
-button.sm{width:auto;padding:6px 10px;margin:4px 4px 0 0;font-size:12px;border-radius:8px}
-.card{background:#fff;padding:14px;border-radius:14px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.06)}
-h1{color:#16a34a;text-align:center;margin-bottom:0}
-.order{background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:10px;margin:6px 0}
-.badge{background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:12px;margin-left:6px}
-.chatrow{display:block;width:100%;text-align:left;background:#f8fafc;color:#111;border:1px solid #e2e8f0;font-weight:normal;font-size:13px;padding:10px;margin:5px 0}
-#chat_modal{display:none;position:f
+app.post('/api/order/complete/:id', auth, (r
