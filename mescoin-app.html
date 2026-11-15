@@ -5,221 +5,185 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coin Market</title>
 <style>
-:root{--bg:#eef2f6;--card:#fff;--ink:#14202b;--mute:#5b6b7a;--line:#d5dde5;--acc:#0f766e;--acc-ink:#fff;--coin:#b27700;--err:#b42318}
-@media (prefers-color-scheme:dark){:root{--bg:#0e1620;--card:#16212d;--ink:#e8eef4;--mute:#93a4b4;--line:#27374a;--acc:#2dd4bf;--acc-ink:#042f2b;--coin:#f5b942;--err:#ff8a7a}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-main{max-width:640px;margin:0 auto;padding:16px 16px 90px}
-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;max-width:640px;margin:0 auto}
-h1{font-size:20px;margin:0}
-h2{font-size:17px;margin:20px 0 8px}
-.coins{font-weight:700;color:var(--coin)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px}
-.row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.mute{color:var(--mute);font-size:14px}
-input,textarea{width:100%;padding:11px;margin:0 0 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
-button{font:inherit;font-weight:600;padding:10px 16px;border:0;border-radius:8px;background:var(--acc);color:var(--acc-ink);cursor:pointer}
-button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
-button.small{padding:7px 12px;font-size:14px}
-button:disabled{opacity:.5}
-:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0)}
-nav button{flex:1;background:none;color:var(--mute);border-radius:0;padding:14px 4px}
-nav button.on{color:var(--acc);box-shadow:inset 0 3px var(--acc)}
-#msg{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:9;max-width:90%;display:none}
-#msg.err{background:var(--err);color:#fff}
-.hide{display:none!important}
-.tabs{display:flex;gap:8px;margin-bottom:12px}
+  :root{--bg:#0f1722;--panel:#162231;--line:#243246;--text:#e6edf5;--mute:#8696aa;--accent:#2dd4bf;--bad:#ff8a7a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,sans-serif;padding:24px 16px 80px;max-width:720px;margin-inline:auto}
+  h1{margin:0 0 4px;font-size:26px} h2{font-size:18px;margin:0 0 12px}
+  p.sub{color:var(--mute);margin:0 0 20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:16px}
+  input,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--text);padding:14px;font:inherit;margin-bottom:10px}
+  input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  button{font:inherit;font-weight:600;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:12px 16px;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06312c}
+  button:disabled{opacity:.5}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row input{flex:1;min-width:120px;margin:0}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .bal{font-size:28px;font-weight:700;color:var(--accent)}
+  .item{border-top:1px solid var(--line);padding:12px 0}
+  .item:first-of-type{border-top:0}
+  .item b{display:block}.item small{color:var(--mute)}
+  .price{color:var(--accent);font-weight:700}
+  .toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);background:var(--bad);color:#2b0b06;padding:12px 20px;border-radius:10px;font-weight:600;max-width:90vw;z-index:9}
+  .toast.ok{background:var(--accent);color:#06312c}
+  .pos{color:var(--accent)}.neg{color:var(--bad)}
+  .hidden{display:none}
 </style>
 </head>
 <body>
-<div id="msg" role="status"></div>
+<div id="toast" class="toast hidden"></div>
+<h1>Coin Market</h1>
+<p class="sub">Buy and sell items with coins.</p>
 
 <!-- Logged out -->
-<main id="authView" class="hide">
-  <h1 style="margin:40px 0 4px">Coin Market</h1>
-  <p class="mute">Buy and sell items with coins.</p>
-  <div class="card">
-    <input id="u" placeholder="Username" autocomplete="username" autocapitalize="none">
-    <input id="p" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">
-    <div class="tabs">
-      <button id="loginBtn">Log in</button>
-      <button id="regBtn" class="ghost">Create account</button>
-    </div>
+<div id="authView" class="card">
+  <input id="u" placeholder="Username" autocomplete="username">
+  <input id="p" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">
+  <div class="row">
+    <button class="primary" id="loginBtn">Log in</button>
+    <button id="regBtn">Create account</button>
   </div>
-</main>
+</div>
 
 <!-- Logged in -->
-<div id="appView" class="hide">
-  <header>
-    <h1>Coin Market</h1>
-    <span class="coins" id="coinTop">0 coins</span>
-  </header>
-  <main>
-    <section id="v-market">
-      <input id="search" type="search" placeholder="Search listings">
-      <div id="items"></div>
-    </section>
+<div id="appView" class="hidden">
+  <div class="card">
+    <div class="top">
+      <div><small style="color:var(--mute)" id="who"></small><div class="bal"><span id="coins">0</span> coins</div></div>
+      <button id="logoutBtn">Log out</button>
+    </div>
+    <div class="row">
+      <input id="amt" type="number" min="1" placeholder="Coin amount">
+      <button class="primary" id="buyCoins">Buy coins</button>
+      <button id="sellCoins">Cash out</button>
+    </div>
+  </div>
 
-    <section id="v-sell" class="hide">
-      <h2>List an item</h2>
-      <div class="card">
-        <input id="t" placeholder="Title" maxlength="100">
-        <textarea id="d" rows="3" placeholder="Description (optional)" maxlength="1000"></textarea>
-        <input id="pr" type="number" min="1" inputmode="numeric" placeholder="Price in coins">
-        <button id="listBtn">Publish listing</button>
-      </div>
-      <h2>My listings and purchases</h2>
-      <div id="mine"></div>
-    </section>
+  <div class="card">
+    <h2>Marketplace</h2>
+    <div class="row" style="margin-bottom:8px">
+      <input id="q" placeholder="Search listings">
+      <button id="searchBtn">Search</button>
+    </div>
+    <div id="items"></div>
+  </div>
 
-    <section id="v-acct" class="hide">
-      <h2 id="who"></h2>
-      <div class="card">
-        <input id="amt" type="number" min="1" inputmode="numeric" placeholder="Number of coins">
-        <div class="tabs">
-          <button id="buyCoins">Buy coins</button>
-          <button id="sellCoins" class="ghost">Cash out coins</button>
-        </div>
-      </div>
-      <h2>Recent activity</h2>
-      <div id="tx"></div>
-      <button id="logout" class="ghost" style="margin-top:16px">Log out</button>
-    </section>
-  </main>
-  <nav>
-    <button data-v="market" class="on">Market</button>
-    <button data-v="sell">Sell</button>
-    <button data-v="acct">Account</button>
-  </nav>
+  <div class="card">
+    <h2>Sell an item</h2>
+    <input id="title" placeholder="Title" maxlength="100">
+    <textarea id="desc" rows="3" placeholder="Description (optional)" maxlength="1000"></textarea>
+    <div class="row">
+      <input id="price" type="number" min="1" placeholder="Price in coins">
+      <button class="primary" id="listBtn">List item</button>
+    </div>
+  </div>
+
+  <div class="card"><h2>My items</h2><div id="mine"></div></div>
+  <div class="card"><h2>Recent activity</h2><div id="tx"></div></div>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let token = null, me = null, msgTimer;
+let token = null, me = null, tt;
 try { token = localStorage.getItem('token'); } catch {}
 
-function toast(text, isErr) {
-  const m = $('msg');
-  m.textContent = text; m.className = isErr ? 'err' : ''; m.style.display = 'block';
-  clearTimeout(msgTimer); msgTimer = setTimeout(() => (m.style.display = 'none'), 3000);
+function say(msg, ok) {
+  const t = $('toast'); t.textContent = msg; t.className = 'toast' + (ok ? ' ok' : '');
+  clearTimeout(tt); tt = setTimeout(() => t.classList.add('hidden'), 3500);
 }
-
 async function api(path, method = 'GET', body) {
-  const res = await fetch('/api' + path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch('/api' + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch { throw new Error('Cannot reach the server. Open this page from your deployed site, not a downloaded file.'); }
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && token) { logout(); }
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  if (!res.ok) {
+    if (res.status === 401 && token) logout(true);
+    throw new Error(data.error || 'Request failed');
+  }
   return data;
 }
-const run = async (fn) => { try { await fn(); } catch (e) { toast(e.message, true); } };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const run = (fn) => async () => { try { await fn(); } catch (e) { say(e.message); } };
 
-function setUser(user) {
-  me = user;
-  $('coinTop').textContent = Number(user.coins).toLocaleString() + ' coins';
-  $('who').textContent = user.username;
+function setSession(d) {
+  token = d.token; me = d.user;
+  try { localStorage.setItem('token', token); } catch {}
+  showApp();
 }
-
-function logout() {
+function logout(expired) {
   token = null; me = null;
   try { localStorage.removeItem('token'); } catch {}
-  show();
+  $('authView').classList.remove('hidden'); $('appView').classList.add('hidden');
+  if (expired) say('Please log in again');
 }
-
-function show() {
-  $('authView').classList.toggle('hide', !!token);
-  $('appView').classList.toggle('hide', !token);
-  if (token) { refreshMe(); loadItems(); }
+async function showApp() {
+  $('authView').classList.add('hidden'); $('appView').classList.remove('hidden');
+  await Promise.all([refreshMe(), loadItems(), loadMine()]);
 }
-
-async function authenticate(kind) {
-  const data = await api('/' + kind, 'POST', { username: $('u').value, password: $('p').value });
-  token = data.token;
-  try { localStorage.setItem('token', token); } catch {}
-  $('p').value = '';
-  show();
-}
-
 async function refreshMe() {
-  const data = await api('/me');
-  setUser(data.user);
-  $('tx').innerHTML = data.transactions.length
-    ? data.transactions.map((t) => `<div class="card row"><div>${esc(t.note || t.kind)}<div class="mute">${new Date(t.created_at).toLocaleString()}</div></div><b>${t.amount > 0 ? '+' : ''}${Number(t.amount).toLocaleString()}</b></div>`).join('')
-    : '<p class="mute">No activity yet. Buy coins to get started.</p>';
+  const d = await api('/me');
+  me = d.user;
+  $('who').textContent = '@' + me.username;
+  $('coins').textContent = Number(me.coins).toLocaleString();
+  $('tx').innerHTML = d.transactions.length ? d.transactions.map((t) => {
+    const n = Number(t.amount);
+    return `<div class="item"><b class="${n >= 0 ? 'pos' : 'neg'}">${n >= 0 ? '+' : ''}${n.toLocaleString()}</b><small>${esc(t.note || t.kind)} · ${new Date(t.created_at).toLocaleDateString()}</small></div>`;
+  }).join('') : '<small style="color:var(--mute)">No activity yet. Buy coins to get started.</small>';
 }
-
 async function loadItems() {
-  const { items } = await api('/items?q=' + encodeURIComponent($('search').value));
-  $('items').innerHTML = items.length
-    ? items.map((i) => `<div class="card"><div class="row"><b>${esc(i.title)}</b><span class="coins">${Number(i.price).toLocaleString()}</span></div>
-        <div class="mute">${esc(i.description)}</div><div class="row" style="margin-top:10px;align-items:center"><span class="mute">by ${esc(i.seller)}</span>
-        ${me && i.seller_id === me.id ? '<span class="mute">Your listing</span>' : `<button class="small" data-buy="${i.id}">Buy</button>`}</div></div>`).join('')
-    : '<p class="mute">No listings found. Be the first to list something in the Sell tab.</p>';
+  const { items } = await api('/items?q=' + encodeURIComponent($('q').value.trim()));
+  $('items').innerHTML = items.length ? items.map((i) => `
+    <div class="item">
+      <b>${esc(i.title)}</b>
+      <small>${esc(i.description || 'No description')} · by @${esc(i.seller)}</small>
+      <div class="row" style="margin-top:8px;justify-content:space-between">
+        <span class="price">${Number(i.price).toLocaleString()} coins</span>
+        ${me && i.seller_id === me.id ? '<small>Your listing</small>' : `<button class="primary" data-buy="${i.id}">Buy</button>`}
+      </div>
+    </div>`).join('') : '<small style="color:var(--mute)">No listings yet. Be the first to sell something.</small>';
 }
-
 async function loadMine() {
   const { items } = await api('/my/items');
-  $('mine').innerHTML = items.length
-    ? items.map((i) => `<div class="card row" style="align-items:center"><div>${esc(i.title)}<div class="mute">${i.role === 'bought' ? 'Bought' : i.status === 'sold' ? 'Sold' : i.status === 'removed' ? 'Removed' : 'Active'} · ${Number(i.price).toLocaleString()} coins</div></div>
-        ${i.role === 'selling' && i.status === 'active' ? `<button class="small ghost" data-del="${i.id}">Remove</button>` : ''}</div>`).join('')
-    : '<p class="mute">Nothing here yet.</p>';
+  $('mine').innerHTML = items.length ? items.map((i) => `
+    <div class="item">
+      <b>${esc(i.title)}</b>
+      <div class="row" style="justify-content:space-between">
+        <small>${i.role === 'bought' ? 'Bought' : i.status === 'sold' ? 'Sold' : i.status === 'removed' ? 'Removed' : 'Listed'} · ${Number(i.price).toLocaleString()} coins</small>
+        ${i.role === 'selling' && i.status === 'active' ? `<button data-del="${i.id}">Remove</button>` : ''}
+      </div>
+    </div>`).join('') : '<small style="color:var(--mute)">Nothing here yet.</small>';
 }
+const reloadAll = () => Promise.all([refreshMe(), loadItems(), loadMine()]);
 
-function view(name) {
-  for (const v of ['market', 'sell', 'acct']) $('v-' + v).classList.toggle('hide', v !== name);
-  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === name));
-  if (name === 'market') run(loadItems);
-  if (name === 'sell') run(loadMine);
-  if (name === 'acct') run(refreshMe);
-}
-
-$('loginBtn').onclick = () => run(() => authenticate('login'));
-$('regBtn').onclick = () => run(() => authenticate('register'));
-$('logout').onclick = logout;
-$('search').oninput = () => run(loadItems);
-document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => view(b.dataset.v)));
-
-$('items').onclick = (e) => {
-  const id = e.target.dataset.buy;
-  if (!id) return;
-  run(async () => {
-    const d = await api(`/items/${id}/buy`, 'POST');
-    setUser({ ...me, coins: d.coins });
-    toast('Purchased');
-    await loadItems();
-  });
-};
-
-$('mine').onclick = (e) => {
-  const id = e.target.dataset.del;
-  if (!id) return;
-  run(async () => { await api('/items/' + id, 'DELETE'); toast('Removed'); await loadMine(); });
-};
-
-$('listBtn').onclick = () => run(async () => {
-  await api('/items', 'POST', { title: $('t').value, description: $('d').value, price: $('pr').value });
-  $('t').value = $('d').value = $('pr').value = '';
-  toast('Listing published');
-  await loadMine();
+$('loginBtn').onclick = run(async () => setSession(await api('/login', 'POST', { username: $('u').value, password: $('p').value })));
+$('regBtn').onclick = run(async () => setSession(await api('/register', 'POST', { username: $('u').value, password: $('p').value })));
+$('logoutBtn').onclick = () => logout();
+$('searchBtn').onclick = run(loadItems);
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('searchBtn').click(); });
+$('p').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('loginBtn').click(); });
+$('buyCoins').onclick = run(async () => { await api('/coins/buy', 'POST', { amount: $('amt').value }); say('Coins added', true); $('amt').value = ''; await refreshMe(); });
+$('sellCoins').onclick = run(async () => { await api('/coins/sell', 'POST', { amount: $('amt').value }); say('Coins cashed out', true); $('amt').value = ''; await refreshMe(); });
+$('listBtn').onclick = run(async () => {
+  await api('/items', 'POST', { title: $('title').value, description: $('desc').value, price: $('price').value });
+  $('title').value = $('desc').value = $('price').value = '';
+  say('Item listed', true); await reloadAll();
+});
+$('items').onclick = run(async (e) => {
+  const id = e.target.dataset?.buy; if (!id) return;
+  await api(`/items/${id}/buy`, 'POST'); say('Purchased', true); await reloadAll();
+});
+$('mine').onclick = run(async (e) => {
+  const id = e.target.dataset?.del; if (!id) return;
+  await api(`/items/${id}`, 'DELETE'); say('Listing removed', true); await reloadAll();
 });
 
-const coinAction = (kind, done) => () => run(async () => {
-  const d = await api('/coins/' + kind, 'POST', { amount: $('amt').value });
-  setUser({ ...me, coins: d.coins });
-  $('amt').value = '';
-  toast(done);
-  await refreshMe();
-});
-$('buyCoins').onclick = coinAction('buy', 'Coins added');
-$('sellCoins').onclick = coinAction('sell', 'Coins cashed out');
-
-show();
+if (token) showApp().catch((e) => say(e.message));
 </script>
 </body>
-          </html>
-  
+  </html>
+    
