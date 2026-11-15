@@ -1,92 +1,223 @@
-const express=require('express'),fs=require('fs'),path=require('path'),crypto=require('crypto'),jwt=require('jsonwebtoken'),cors=require('cors');
-const app=express(); app.use(cors()); app.use(express.json());
-const DB_FILE=fs.existsSync('/data')?'/data/database.json':'./database.json';
-const SECRET=process.env.JWT_SECRET||'btc-mescoin-secret';
-const FOUNDER='254768871831'; const FOUNDER_CODE=process.env.FOUNDER_CODE||'MES100M';
-const clean=p=>(p||'').toString().replace(/\D/g,'').slice(-9);
-const newId=()=>crypto.randomUUID();
+const express = require('express');
+const path = require('path');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
 
-function hashSha(d){return crypto.createHash('sha256').update(d).digest('hex');}
-function blockHash(prev,time,txs,nonce){return hashSha(prev+time+JSON.stringify(txs)+nonce);}
+// Render injects PORT; bind to 0.0.0.0 or the deploy times out.
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || require('crypto').randomBytes(32).toString('hex');
+if (!process.env.JWT_SECRET) console.warn('JWT_SECRET not set: logins reset on every restart.');
 
-function loadChain(){
- if(!fs.existsSync(DB_FILE)){let g={index:0,prev_hash:'0',timestamp:new Date().toISOString(),transactions:[{from:'GENESIS',to:'NETWORK',amount:0}],nonce:0,hash:''}; g.hash=blockHash(g.prev_hash,g.timestamp,g.transactions,g.nonce); fs.writeFileSync(DB_FILE,JSON.stringify({users:[],blockchain:[g]},null,2));}
- let r=JSON.parse(fs.readFileSync(DB_FILE,'utf8')); if(!r.blockchain.length){let g={index:0,prev_hash:'0',timestamp:new Date().toISOString(),transactions:[{from:'GENESIS',to:'NETWORK',amount:0}],nonce:0,hash:''}; g.hash=blockHash(g.prev_hash,g.timestamp,g.transactions,g.nonce); r.blockchain=[g];} return r;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL && !/localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL)
+    ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+// An idle-client error must never kill the process.
+pool.on('error', (e) => console.error('pg pool error:', e.message));
+process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
+process.on('uncaughtException', (e) => console.error('uncaughtException:', e));
+
+let dbReady = false;
+async function initDb() {
+  for (let i = 1; ; i++) {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          coins BIGINT NOT NULL DEFAULT 0 CHECK (coins >= 0),
+          created_at TIMESTAMPTZ DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS items (
+          id SERIAL PRIMARY KEY,
+          seller_id INT NOT NULL REFERENCES users(id),
+          buyer_id INT REFERENCES users(id),
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          price BIGINT NOT NULL CHECK (price > 0),
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TIMESTAMPTZ DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS transactions (
+          id SERIAL PRIMARY KEY,
+          user_id INT NOT NULL REFERENCES users(id),
+          kind TEXT NOT NULL,
+          amount BIGINT NOT NULL,
+          note TEXT,
+          created_at TIMESTAMPTZ DEFAULT now()
+        );`);
+      dbReady = true;
+      console.log('Database ready');
+      return;
+    } catch (e) {
+      console.error(`DB init attempt ${i} failed: ${e.message}`);
+      await new Promise((r) => setTimeout(r, Math.min(30000, 2000 * i)));
+    }
+  }
 }
-let db=loadChain(); let users=db.users||[]; let blockchain=db.blockchain||[];
-function save(){fs.writeFileSync(DB_FILE,JSON.stringify({users,blockchain},null,2));}
 
-function getBalance(acc){
- let b=0; let a=acc.toUpperCase();
- for(let bl of blockchain) for(let tx of bl.transactions){ if(tx.to&&tx.to.toUpperCase()===a) b+=Number(tx.amount); if(tx.from&&tx.from.toUpperCase()===a) b-=Number(tx.amount); }
- return b;
+const app = express();
+app.disable('x-powered-by');
+app.use(express.json({ limit: '50kb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Always answers 200 so Render never restarts you while the DB warms up.
+app.get('/healthz', (_req, res) => res.json({ ok: true, db: dbReady }));
+
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+const fail = (res, code, msg) => res.status(code).json({ error: msg });
+const needDb = (_req, res, next) => (dbReady ? next() : fail(res, 503, 'Starting up, try again in a moment'));
+app.use('/api', needDb);
+
+function auth(req, res, next) {
+  const h = req.headers.authorization || '';
+  try {
+    req.user = jwt.verify(h.replace('Bearer ', ''), JWT_SECRET);
+    next();
+  } catch { fail(res, 401, 'Please log in'); }
 }
-function mine(txs){
- let prev=blockchain[blockchain.length-1]; let ts=new Date().toISOString(); let nonce=0; let h='';
- do{nonce++; h=blockHash(prev.hash,ts,txs,nonce);}while(!h.startsWith('00'));
- return {index:prev.index+1,prev_hash:prev.hash,timestamp:ts,transactions:txs,nonce,hash:h};
-}
-function addBlock(txs){let b=mine(txs); blockchain.push(b); save(); return b;}
+const token = (u) => jwt.sign({ id: u.id, username: u.username }, JWT_SECRET, { expiresIn: '7d' });
+const toInt = (v) => (Number.isSafeInteger(Number(v)) ? Number(v) : NaN);
 
-function hashPw(pw){let s=crypto.randomBytes(16).toString('hex'); return 'scrypt$'+s+'$'+crypto.scryptSync(String(pw),s,32).toString('hex');}
-function checkPw(u,pw){let s=u.password||''; if(s.startsWith('scrypt$')){let p=s.split('$'); let a=crypto.scryptSync(String(pw),p[1],32); let b=Buffer.from(p[2],'hex'); return a.length===b.length&&crypto.timingSafeEqual(a,b);} return false;}
-function safe(u){let {password,...r}=u; return r;}
+app.post('/api/register', wrap(async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '');
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) return fail(res, 400, 'Username: 3-20 letters, numbers or _');
+  if (password.length < 6) return fail(res, 400, 'Password must be at least 6 characters');
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const { rows } = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1,$2) RETURNING id, username, coins', [username, hash]);
+    res.json({ token: token(rows[0]), user: rows[0] });
+  } catch (e) {
+    if (e.code === '23505') return fail(res, 409, 'Username already taken');
+    throw e;
+  }
+}));
 
-function auth(req,res,next){try{let t=req.headers.authorization?.split(' ')[1]; let d=jwt.verify(t,SECRET); req.user=users.find(u=>u.id===d.id); if(!req.user) return res.status(401).json({error:'no user'}); next();}catch{return res.status(401).json({error:'invalid'});}}
+app.post('/api/login', wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM users WHERE username=$1', [String(req.body.username || '').trim()]);
+  const u = rows[0];
+  if (!u || !(await bcrypt.compare(String(req.body.password || ''), u.password_hash))) return fail(res, 401, 'Wrong username or password');
+  res.json({ token: token(u), user: { id: u.id, username: u.username, coins: u.coins } });
+}));
 
-// ---- BTC API ----
-app.get('/api/btc/info',(req,res)=>{res.json({blocks:blockchain.length, last:blockchain[blockchain.length-1], founder:FOUNDER});});
-app.get('/api/btc/balance/:acc',(req,res)=>{res.json({account:req.params.acc, balance:getBalance(req.params.acc), source:'blockchain only - like BTC'});});
-app.get('/api/blockchain',(req,res)=>{res.json(blockchain.slice(-20).reverse());});
+app.get('/api/me', auth, wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT id, username, coins FROM users WHERE id=$1', [req.user.id]);
+  if (!rows[0]) return fail(res, 401, 'Account not found');
+  const tx = await pool.query('SELECT kind, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 15', [req.user.id]);
+  res.json({ user: rows[0], transactions: tx.rows });
+}));
 
-app.post('/api/signup',(req,res)=>{
- let {full_name,phone,password,founder_code}=req.body||{};
- let cp=clean(phone); if(!full_name||!cp||!password) return res.status(400).json({error:'required'});
- if(users.find(u=>clean(u.phone)===cp)) return res.status(400).json({error:'registered'});
- if(cp===clean(FOUNDER) && founder_code!==FOUNDER_CODE) return res.status(403).json({error:'founder code MES100M needed'});
- let u={id:newId(),full_name:full_name.trim().slice(0,40),phone:cp,password:hashPw(password),mes_account:'MES'+crypto.randomInt(100000,999999)};
- users.push(u);
- if(cp===clean(FOUNDER)){ addBlock([{from:'GENESIS_BANK_100M',to:u.mes_account,amount:100000000,note:'Founder BTC like'}]); }
- else{ addBlock([{from:'GENESIS',to:u.mes_account,amount:0,note:'new account'}]); }
- save();
- res.json({token:jwt.sign({id:u.id},SECRET,{expiresIn:'7d'}),user:{...safe(u),balance:getBalance(u.mes_account)}});
+// BUY COINS. Demo only: credits instantly. For real money, add Stripe Checkout
+// and credit coins from a verified webhook, never from this endpoint.
+app.post('/api/coins/buy', auth, wrap(async (req, res) => {
+  const amount = toInt(req.body.amount);
+  if (!(amount >= 1 && amount <= 100000)) return fail(res, 400, 'Amount must be 1 to 100,000');
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const { rows } = await c.query('UPDATE users SET coins = coins + $1 WHERE id=$2 RETURNING coins', [amount, req.user.id]);
+    await c.query("INSERT INTO transactions (user_id, kind, amount, note) VALUES ($1,'buy_coins',$2,'Purchased coins')", [req.user.id, amount]);
+    await c.query('COMMIT');
+    res.json({ coins: rows[0].coins });
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+}));
+
+// SELL COINS (cash out). Demo only: deducts coins; hook up a payout provider here.
+app.post('/api/coins/sell', auth, wrap(async (req, res) => {
+  const amount = toInt(req.body.amount);
+  if (!(amount >= 1)) return fail(res, 400, 'Enter a valid amount');
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const { rows } = await c.query('UPDATE users SET coins = coins - $1 WHERE id=$2 AND coins >= $1 RETURNING coins', [amount, req.user.id]);
+    if (!rows[0]) { await c.query('ROLLBACK'); return fail(res, 400, 'Not enough coins'); }
+    await c.query("INSERT INTO transactions (user_id, kind, amount, note) VALUES ($1,'sell_coins',$2,'Cashed out coins')", [req.user.id, -amount]);
+    await c.query('COMMIT');
+    res.json({ coins: rows[0].coins });
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+}));
+
+// MARKETPLACE
+app.get('/api/items', wrap(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const { rows } = await pool.query(
+    `SELECT i.id, i.title, i.description, i.price, i.status, i.seller_id, u.username AS seller
+     FROM items i JOIN users u ON u.id=i.seller_id
+     WHERE i.status='active' AND ($1='' OR i.title ILIKE '%'||$1||'%')
+     ORDER BY i.id DESC LIMIT 100`, [q]);
+  res.json({ items: rows });
+}));
+
+app.get('/api/my/items', auth, wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, title, price, status, buyer_id FROM items WHERE seller_id=$1 OR buyer_id=$1 ORDER BY id DESC LIMIT 100`, [req.user.id]);
+  res.json({ items: rows.map((r) => ({ ...r, role: r.buyer_id === req.user.id ? 'bought' : 'selling' })) });
+}));
+
+app.post('/api/items', auth, wrap(async (req, res) => {
+  const title = String(req.body.title || '').trim().slice(0, 100);
+  const description = String(req.body.description || '').trim().slice(0, 1000);
+  const price = toInt(req.body.price);
+  if (title.length < 2) return fail(res, 400, 'Add a title');
+  if (!(price >= 1 && price <= 10000000)) return fail(res, 400, 'Price must be at least 1 coin');
+  const { rows } = await pool.query(
+    'INSERT INTO items (seller_id, title, description, price) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, title, description, price]);
+  res.json({ id: rows[0].id });
+}));
+
+app.delete('/api/items/:id', auth, wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    "UPDATE items SET status='removed' WHERE id=$1 AND seller_id=$2 AND status='active'", [toInt(req.params.id), req.user.id]);
+  if (!rowCount) return fail(res, 404, 'Listing not found');
+  res.json({ ok: true });
+}));
+
+// Atomic purchase: row locks prevent double-buys and overspending.
+app.post('/api/items/:id/buy', auth, wrap(async (req, res) => {
+  const itemId = toInt(req.params.id);
+  if (Number.isNaN(itemId)) return fail(res, 400, 'Bad item');
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const it = (await c.query('SELECT * FROM items WHERE id=$1 FOR UPDATE', [itemId])).rows[0];
+    if (!it || it.status !== 'active') { await c.query('ROLLBACK'); return fail(res, 409, 'Item is no longer available'); }
+    if (it.seller_id === req.user.id) { await c.query('ROLLBACK'); return fail(res, 400, "You can't buy your own listing"); }
+    const ids = [req.user.id, it.seller_id].sort((a, b) => a - b); // consistent lock order, no deadlocks
+    await c.query('SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR UPDATE', [ids]);
+    const paid = await c.query('UPDATE users SET coins = coins - $1 WHERE id=$2 AND coins >= $1 RETURNING coins', [it.price, req.user.id]);
+    if (!paid.rows[0]) { await c.query('ROLLBACK'); return fail(res, 400, 'Not enough coins. Buy more first.'); }
+    await c.query('UPDATE users SET coins = coins + $1 WHERE id=$2', [it.price, it.seller_id]);
+    await c.query("UPDATE items SET status='sold', buyer_id=$1 WHERE id=$2", [req.user.id, itemId]);
+    await c.query("INSERT INTO transactions (user_id, kind, amount, note) VALUES ($1,'purchase',$2,$3),($4,'sale',$5,$3)",
+      [req.user.id, -it.price, it.title, it.seller_id, it.price]);
+    await c.query('COMMIT');
+    res.json({ coins: paid.rows[0].coins });
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+}));
+
+app.use('/api', (_req, res) => fail(res, 404, 'Not found'));
+// Last-resort error handler: log it, answer cleanly, keep the process alive.
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  if (!res.headersSent) fail(res, 500, 'Something went wrong');
 });
-app.post('/api/login',(req,res)=>{
- let {login_id,password}=req.body||{}; let cp=clean(login_id); let up=String(login_id).toUpperCase();
- let u=users.find(x=>clean(x.phone)===cp||x.mes_account.toUpperCase()===up);
- if(!u||!checkPw(u,password)) return res.status(400).json({error:'wrong'});
- res.json({token:jwt.sign({id:u.id},SECRET,{expiresIn:'7d'}),user:{...safe(u),balance:getBalance(u.mes_account)}});
-});
-app.get('/api/me',auth,(req,res)=>{res.json({...safe(req.user),balance:getBalance(req.user.mes_account),blocks:blockchain.length});});
 
-app.post('/api/send',auth,(req,res)=>{
- let {to_account,amount}=req.body||{}; let amt=Number(amount);
- if(!to_account||!Number.isFinite(amt)||amt<=0) return res.status(400).json({error:'invalid'});
- let bal=getBalance(req.user.mes_account); if(bal<amt) return res.status(400).json({error:'Not enough - BTC checks chain, you have '+bal});
- let acc=String(to_account).trim().toUpperCase();
- let recv=users.find(u=>u.mes_account.toUpperCase()===acc||clean(u.phone)===clean(to_account));
- if(!recv) return res.status(400).json({error:'receiver not found'});
- if(recv.id===req.user.id) return res.status(400).json({error:'self'});
- let blk=addBlock([{from:req.user.mes_account,to:recv.mes_account,amount:amt,note:'BTC-like P2P'}]);
- res.json({message:'Sent '+amt+' MES - mined in block '+blk.index+' like BTC',block:blk,balance:getBalance(req.user.mes_account)});
-});
+const server = app.listen(PORT, '0.0.0.0', () => console.log(`Listening on ${PORT}`));
+server.keepAliveTimeout = 120000; // longer than Render's proxy timeout
+server.headersTimeout = 125000;
+initDb();
 
-app.get('/',(req,res)=>{
- res.send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui;max-width:480px;margin:auto;padding:12px;background:#fefce8}.card{background:#fff;padding:12px;border-radius:12px;margin:8px 0;border:1px solid #eee}input,button{width:100%;padding:11px;margin:5px 0;border-radius:8px;border:1px solid #ddd;box-sizing:border-box}button{background:#000;color:#fff;font-weight:bold}h2{text-align:center}</style></head><body>
-<h2>⚡ MESCOIN BTC</h2>
-<div class="card"><b>Like Bitcoin:</b> No mes_balance field. Balance = sum of blockchain only.<br>Blocks: <span id="bc">-</span> | My Balance: <b id="bal">-</b> (from chain)</div>
-<div class="card" id="auth"><input id="fn" placeholder="Full name"><input id="ph" placeholder="Phone 07..."><input id="pw" type="password" placeholder="Password"><input id="fc" placeholder="Founder code MES100M if founder"><button onclick="signup()">SIGNUP - BTC LIKE</button><hr><input id="li" placeholder="Phone or MES..."><input id="lp" type="password" placeholder="Password"><button onclick="login()">LOGIN</button><p id="msg"></p></div>
-<div class="card" id="dash" style="display:none"><b id="name"></b> <span id="acc"></span><br><input id="to" placeholder="To MES... or phone"><input id="am" type="number" placeholder="Amount"><button onclick="send()">SEND - MINES BLOCK LIKE BTC</button><pre id="chain" style="font-size:10px;max-height:200px;overflow:auto;background:#f5f5f5;padding:6px"></pre><button onclick="logout()" style="background:#333">Logout</button></div>
-<script>
-let token=localStorage.getItem('t')||''; async function api(p,o={}){o.headers=Object.assign({'Content-Type':'application/json',Authorization:'Bearer '+token},o.headers||{}); let r=await fetch(p,o); let d=await r.json(); if(!r.ok) throw d; return d;}
-async function signup(){try{let d=await api('/api/signup',{method:'POST',body:JSON.stringify({full_name:fn.value,phone:ph.value,password:pw.value,founder_code:fc.value})}); token=d.token; localStorage.setItem('t',token); go(d.user);}catch(e){msg.innerText=e.error;}}
-async function login(){try{let d=await api('/api/login',{method:'POST',body:JSON.stringify({login_id:li.value,password:lp.value})}); token=d.token; localStorage.setItem('t',token); go(d.user);}catch(e){msg.innerText=e.error;}}
-function go(u){auth.style.display='none';dash.style.display='block';name.innerText=u.full_name;acc.innerText=u.mes_account;bal.innerText=u.balance;bc.innerText='loading'; load();}
-async function load(){try{let me=await api('/api/me'); bal.innerText=me.balance; name.innerText=me.full_name; acc.innerText=me.mes_account; bc.innerText=me.blocks; let ch=await api('/api/blockchain'); chain.innerText=JSON.stringify(ch,null,2);}catch{}}
-async function send(){try{let d=await api('/api/send',{method:'POST',body:JSON.stringify({to_account:to.value,amount:am.value})}); alert(d.message); load();}catch(e){alert(e.error);}}
-function logout(){localStorage.removeItem('t'); location.reload();}
-if(token){api('/api/me').then(go).catch(()=>{});}
-</script></body></html>`);
+// Render sends SIGTERM on deploy: finish requests, then exit.
+process.on('SIGTERM', () => {
+  server.close(() => pool.end().finally(() => process.exit(0)));
+  setTimeout(() => process.exit(0), 10000).unref();
 });
-
-app.listen(process.env.PORT||10000,()=>console.log('BTC-LIKE MESCOIN RUNNING blocks:'+blockchain.length));
+       
