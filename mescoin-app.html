@@ -1,44 +1,72 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mescoin</title><style>*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}body{background:#0a0a0a;color:#fff;padding:15px;padding-bottom:90px}.gold{color:#FFD700}.card{background:#1a1a1a;padding:15px;border-radius:15px;margin:12px 0}input{width:100%;padding:12px;margin:6px 0;border-radius:10px;border:none;background:#2a2a2a;color:#fff}button{width:100%;padding:13px;border:none;border-radius:10px;font-weight:bold;margin:6px 0;cursor:pointer}.yellow{background:#FFD700}.green{background:#00c853;color:#fff}.red{background:#ff1744;color:#fff}.good{background:#222;padding:12px;border-radius:12px;margin:8px 0;display:flex;justify-content:space-between}.tab{display:none}.tab.active{display:block}.bottom{position:fixed;bottom:0;left:0;right:0;background:#1a1a1a;display:flex;justify-content:space-around;padding:12px}</style></head>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mescoin</title>
+<style>
+body{background:#0a0a0a;color:white;font-family:Arial;padding:20px}
+h1{text-align:center;color:#FFD700}
+.card{background:#1a1a1a;padding:18px;border-radius:15px}
+input{width:100%;padding:13px;margin:7px 0;border-radius:10px;border:none;background:#333;color:white}
+button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;margin:6px 0}
+.yellow{background:#FFD700}.green{background:#00c853;color:white}
+</style>
+</head>
 <body>
-<h1 style="text-align:center">🪙 <span class="gold">MESCOIN</span></h1>
-<p style="text-align:center" id="priceLine">Price loading...</p>
+<h1>🪙 MESCOIN</h1>
 
-<!-- LOGIN / SIGNUP -->
-<div id="auth" class="card">
-<h2>Login / Sign Up</h2>
-<input id="name" placeholder="Full Name (for Sign Up)">
+<div id="loginPage" class="card">
+<h2>Welcome</h2>
+<input id="name" placeholder="Your Name">
 <input id="phone" placeholder="Phone e.g 0722000000">
 <input id="pin" type="password" placeholder="PIN e.g 1234">
 <button class="yellow" onclick="signup()">CREATE ACCOUNT</button>
 <button class="green" onclick="login()">LOGIN</button>
-<p id="authMsg"></p>
+<p id="msg"></p>
 </div>
 
-<!-- APP -->
-<div id="app" style="display:none">
-<div class="card"><p>Hello <b id="userName"></b> (<span id="userPhone"></span>)</p><h2 class="gold">Balance: KSh <span id="bal">0</span></h2><h2>Coins: <span id="coins">0</span> MES</h2><button class="red" onclick="logout()">Logout</button></div>
-
-<div class="card"><h3>Buy / Sell Mescoin</h3><input id="kshAmt" type="number" placeholder="Amount in KSh to Buy"><button class="green" onclick="buy()">BUY MESCOIN</button><input id="sellAmt" type="number" placeholder="Amount in MES to Sell"><button class="red" onclick="sell()">SELL MESCOIN</button></div>
-
-<div class="card"><h3>Send Mescoin</h3><p style="font-size:13px">Only to someone who already has account</p><input id="toPhone" placeholder="Receiver Phone"><input id="sendCoins" type="number" placeholder="MES to send"><button class="yellow" onclick="sendCoin()">SEND ➡️</button><p id="sendMsg"></p></div>
-
-<div class="card"><h3>🛒 Marketplace - Buy Goods with MES</h3><input id="gTitle" placeholder="What are you selling? e.g 1kg Sugar"><input id="gPrice" type="number" placeholder="Price in MES e.g 3"><button class="yellow" onclick="addGood()">POST MY GOOD</button><div id="goods"></div></div>
+<div id="appPage" class="card" style="display:none">
+<h3>Hello <span id="uName"></span></h3>
+<p>Balance: KSh <b id="bal">0</b> | Coins: <b id="coins">0</b> MES</p>
+<hr>
+<h3>Send Mescoin</h3>
+<input id="toPhone" placeholder="To Phone - must have account">
+<input id="sendMes" type="number" placeholder="MES to send">
+<button class="yellow" onclick="sendCoin()">SEND</button>
+<p id="msg2"></p>
+<button onclick="location.reload()">Logout</button>
 </div>
 
 <script>
-let me=null; let price=125;
-async function refreshPrice(){let r=await fetch('/api/price');let d=await r.json();price=d.price;document.getElementById('priceLine').innerText=`1 MES = KSh ${price.toFixed(2)}`; }
-setInterval(refreshPrice,5000); refreshPrice();
-function showUser(u){me=u;document.getElementById('auth').style.display='none';document.getElementById('app').style.display='block';document.getElementById('userName').innerText=u.name;document.getElementById('userPhone').innerText=u.phone;document.getElementById('bal').innerText=u.balance.toFixed(0);document.getElementById('coins').innerText=u.coins.toFixed(2);loadGoods();}
-async function signup(){let r=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('name').value,phone:document.getElementById('phone').value,pin:document.getElementById('pin').value})});let d=await r.json();document.getElementById('authMsg').innerText=d.msg;if(d.success)showUser(d.user);}
-async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:document.getElementById('phone').value,pin:document.getElementById('pin').value})});let d=await r.json();document.getElementById('authMsg').innerText=d.msg||"";if(d.success)showUser(d.user);else alert(d.msg);}
-async function buy(){let r=await fetch('/api/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:me.phone,ksh:parseFloat(document.getElementById('kshAmt').value)})});let d=await r.json();alert(d.msg);if(d.success)showUser(d.user);}
-async function sell(){let r=await fetch('/api/sell',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:me.phone,coins:parseFloat(document.getElementById('sellAmt').value)})});let d=await r.json();alert(d.msg);if(d.success)showUser(d.user);}
-async function sendCoin(){let r=await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fromPhone:me.phone,toPhone:document.getElementById('toPhone').value,coins:parseFloat(document.getElementById('sendCoins').value)})});let d=await r.json();document.getElementById('sendMsg').innerText=d.msg;alert(d.msg);if(d.success)showUser(d.user);}
-async function loadGoods(){let r=await fetch('/api/goods');let g=await r.json();document.getElementById('goods').innerHTML=g.map(x=>`<div class="good"><div><b>${x.img} ${x.title}</b><br><small>by ${x.seller} - ${x.phone}</small></div><div><b>${x.price} MES</b><br><button class="green" style="padding:8px" onclick="buyGood(${x.id})">Buy</button></div></div>`).join('');}
-async function addGood(){let r=await fetch('/api/goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:document.getElementById('gTitle').value,price:document.getElementById('gPrice').value,seller:me.name,phone:me.phone})});let d=await r.json();loadGoods();alert("Posted!");}
-async function buyGood(id){let r=await fetch('/api/buy-good',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:me.phone,id})});let d=await r.json();alert(d.msg);if(d.success){showUser(d.user);loadGoods();}}
-function logout(){location.reload();}
-loadGoods();
-</script></body></html>
+let myPhone = "";
+async function signup(){
+  let name=document.getElementById('name').value, phone=document.getElementById('phone').value, pin=document.getElementById('pin').value;
+  let r = await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,phone,pin})});
+  let d = await r.json();
+  document.getElementById('msg').innerText = d.msg;
+  if(d.success){ myPhone=phone; show(d.user); }
+}
+async function login(){
+  let phone=document.getElementById('phone').value, pin=document.getElementById('pin').value;
+  let r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,pin})});
+  let d = await r.json();
+  document.getElementById('msg').innerText = d.msg;
+  if(d.success){ myPhone=phone; show(d.user); }
+}
+async function sendCoin(){
+  let toPhone=document.getElementById('toPhone').value, coins=parseFloat(document.getElementById('sendMes').value);
+  let r = await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fromPhone:myPhone,toPhone,coins})});
+  let d = await r.json();
+  document.getElementById('msg2').innerText = d.msg;
+  if(d.success) show(d.user);
+}
+function show(user){
+  document.getElementById('loginPage').style.display='none';
+  document.getElementById('appPage').style.display='block';
+  document.getElementById('uName').innerText=user.name;
+  document.getElementById('bal').innerText=user.balance;
+  document.getElementById('coins').innerText=user.coins;
+}
+</script>
+</body>
+                                    </html>
