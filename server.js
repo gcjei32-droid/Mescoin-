@@ -23,6 +23,15 @@ function checkPin(pin, stored) {
 function safe(u) {
   return { name: u.name, phone: u.phone, balance: round(u.balance), coins: round(u.coins) };
 }
+// Special account: gets 100,000,000 MES once (on first login/signup)
+const BONUS_PHONE = '0768871831';
+const BONUS_MES = 100000000;
+function giveBonus(u) {
+  if (u.phone === BONUS_PHONE && !u.bonusGiven) {
+    u.coins = round(u.coins + BONUS_MES);
+    u.bonusGiven = true;
+  }
+}
 function mask(phone) {
   return phone.slice(0, 4) + '***' + phone.slice(-3);
 }
@@ -200,6 +209,7 @@ app.post('/api/signup', (req, res) => {
   if (!/^\d{4}$/.test(pin)) return res.json({ success: false, msg: "PIN must be 4 digits" });
   if (users[phone]) return res.json({ success: false, msg: "Account already exists. Please LOGIN" });
   users[phone] = { name, phone, pin: hashPin(pin), coins: 0, balance: 1000 };
+  giveBonus(users[phone]);
   res.json({ success: true, msg: "Account Created! Bonus 1000 KSh", user: safe(users[phone]) });
 });
 
@@ -208,6 +218,7 @@ app.post('/api/login', (req, res) => {
   if (!users[phone]) return res.json({ success: false, msg: "No account. Please CREATE ACCOUNT first" });
   const u = authUser(res, phone, req.body.pin);
   if (!u) return;
+  giveBonus(u);
   res.json({ success: true, msg: "Welcome " + u.name, user: safe(u) });
 });
 
