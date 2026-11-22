@@ -23,11 +23,13 @@ function checkPin(pin, stored) {
 function safe(u) {
   return { name: u.name, phone: u.phone, balance: round(u.balance), coins: round(u.coins) };
 }
-// Special account: gets 100,000,000 MES once (on first login/signup)
+// Special account: the ONLY account that gets bonuses (1000 KSh + 100,000,000 MES, once)
 const BONUS_PHONE = '0768871831';
+const BONUS_KSH = 1000;
 const BONUS_MES = 100000000;
 function giveBonus(u) {
   if (u.phone === BONUS_PHONE && !u.bonusGiven) {
+    u.balance = round(u.balance + BONUS_KSH);
     u.coins = round(u.coins + BONUS_MES);
     u.bonusGiven = true;
   }
@@ -208,9 +210,15 @@ app.post('/api/signup', (req, res) => {
   if (!/^\d{9,13}$/.test(phone)) return res.json({ success: false, msg: "Enter a valid phone number" });
   if (!/^\d{4}$/.test(pin)) return res.json({ success: false, msg: "PIN must be 4 digits" });
   if (users[phone]) return res.json({ success: false, msg: "Account already exists. Please LOGIN" });
-  users[phone] = { name, phone, pin: hashPin(pin), coins: 0, balance: 1000 };
+  // Everyone starts with 0 KSh and 0 MES. Only BONUS_PHONE gets a bonus (via giveBonus).
+  users[phone] = { name, phone, pin: hashPin(pin), coins: 0, balance: 0 };
   giveBonus(users[phone]);
-  res.json({ success: true, msg: "Account Created! Bonus 1000 KSh", user: safe(users[phone]) });
+  const isBonus = phone === BONUS_PHONE;
+  res.json({
+    success: true,
+    msg: isBonus ? "Account Created! Bonus added" : "Account Created!",
+    user: safe(users[phone])
+  });
 });
 
 app.post('/api/login', (req, res) => {
@@ -331,4 +339,4 @@ app.post('/api/market/cancel', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Running on " + PORT));
-    
+         
