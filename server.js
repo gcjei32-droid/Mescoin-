@@ -2,20 +2,13 @@ const express = require('express');
 const crypto = require('crypto');
 const app = express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: false })); // needed for the plain HTML deposit/withdraw forms
-
-// ---------- SETTINGS ----------
-const TILL = process.env.TILL || '123456';        // <-- put YOUR till number here (or set TILL on your host)
-const ADMIN_KEY = process.env.ADMIN_KEY || '';    // <-- set a long random value on your host
 
 // ---------- DATA (in memory: resets on restart. Use a real DB for real balances) ----------
 let users = {};
-let orders = {};   // marketplace orders posted by users
-let requests = {}; // deposit / withdraw requests
+let orders = {}; // marketplace orders posted by users
 
 // ---------- HELPERS ----------
 const round = n => Math.round(n * 100) / 100;
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function hashPin(pin) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -44,13 +37,6 @@ function giveBonus(u) {
 function mask(phone) {
   return phone.slice(0, 4) + '***' + phone.slice(-3);
 }
-
-// Simple result page used by the deposit/withdraw forms (no JavaScript needed)
-const page = (msg, ok) => `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
-body{background:#0a0a0a;color:white;font-family:Arial;padding:20px}
-.card{background:#1a1a1a;padding:18px;border-radius:15px}
-a{display:block;text-align:center;background:#FFD700;color:#000;padding:14px;border-radius:10px;font-weight:bold;text-decoration:none;margin-top:12px}
-</style></head><body><div class="card"><h3>${ok ? '✅' : '❌'}</h3><p>${esc(msg)}</p><a href="/">← Back to Mescoin</a></div></body></html>`;
 
 // PIN attempt limiter: 5 wrong tries = locked 5 minutes
 const attempts = {};
@@ -87,8 +73,6 @@ button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;m
 .ord{background:#262626;padding:12px;border-radius:12px;margin:8px 0;cursor:pointer;border:1px solid #333}
 .ord:hover{border-color:#FFD700}
 .ord small{color:#aaa}
-summary{cursor:pointer;padding:4px 0}
-details[open] summary{color:#FFD700}
 #detail{background:#262626;padding:14px;border-radius:12px;margin-top:10px;border:1px solid #FFD700}
 #note{color:#FFD700;min-height:20px}
 </style></head><body><h1>🪙 MESCOIN</h1>
@@ -105,23 +89,6 @@ details[open] summary{color:#FFD700}
 <div id="homeView">
 <div class="row"><button class="yellow" onclick="openMarket('buy')">BUY</button><button class="green" onclick="openMarket('sell')">SELL</button></div>
 <button class="grey" onclick="openMine()">MY ORDERS</button>
-
-<details class="ord"><summary><b>💰 DEPOSIT</b></summary>
-<form method="POST" action="/deposit">
-<small>Pay by M-Pesa Buy Goods to Till <b>${TILL}</b>, then enter the code from the M-Pesa message.</small>
-<input name="phone" placeholder="Your phone" required>
-<input name="amount" type="number" placeholder="Amount KSh" required>
-<input name="code" placeholder="M-Pesa code e.g. SGH7XXXXXX" required>
-<input name="pin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN" required>
-<button class="green">SUBMIT DEPOSIT</button></form></details>
-
-<details class="ord"><summary><b>🏧 WITHDRAW</b></summary>
-<form method="POST" action="/withdraw">
-<input name="phone" placeholder="Your phone" required>
-<input name="amount" type="number" placeholder="Amount KSh" required>
-<input name="pin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN" required>
-<button class="yellow">REQUEST WITHDRAWAL</button></form></details>
-
 <hr><h3>Send Mescoin</h3>
 <input id="toPhone" placeholder="To Phone - must have account"><input id="sendMes" type="number" placeholder="MES to send"><input id="sendPin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN">
 <button class="yellow" onclick="sendCoin()">SEND</button>
@@ -278,70 +245,6 @@ app.post('/api/send', (req, res) => {
   res.json({ success: true, msg: "Sent " + coins + " MES to " + users[toPhone].name, user: safe(from) });
 });
 
-// ---------- DEPOSIT / WITHDRAW ----------
-// Deposit: user pays your till, submits the M-Pesa code. Balance is added only when YOU approve in /admin.
-// Withdraw: KSh is taken from the balance right away and waits for you to pay out and press "Mark paid".
-app.post('/deposit', (req, res) => {
-  const phone = String(req.body.phone || '').trim();
-  const amount = round(Number(req.body.amount));
-  const code = String(req.body.code || '').trim().toUpperCase();
-  if (!(amount >= 10 && amount <= 150000)) return res.send(page("Amount must be KSh 10 - 150,000"));
-  if (!/^[A-Z0-9]{8,12}$/.test(code)) return res.send(page("Enter the M-Pesa transaction code"));
-  if (Object.values(requests).some(r => r.type === 'deposit' && r.code === code))
-    return res.send(page("That code was already submitted"));
-  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
-  if (!u) return;
-  const id = crypto.randomBytes(8).toString('hex');
-  requests[id] = { id, type: 'deposit', phone, amount, code, status: 'pending', created: Date.now() };
-  res.send(page("Deposit of KSh " + amount + " received. It will be added once confirmed.", true));
-});
-
-app.post('/withdraw', (req, res) => {
-  const phone = String(req.body.phone || '').trim();
-  const amount = round(Number(req.body.amount));
-  if (!(amount >= 50 && amount <= 150000)) return res.send(page("Amount must be KSh 50 - 150,000"));
-  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
-  if (!u) return;
-  if (u.balance < amount) return res.send(page("Not enough KSh"));
-  u.balance = round(u.balance - amount); // locked until paid or rejected
-  const id = crypto.randomBytes(8).toString('hex');
-  requests[id] = { id, type: 'withdraw', phone, amount, status: 'pending', created: Date.now() };
-  res.send(page("Withdrawal of KSh " + amount + " requested. It will be sent to " + phone + " shortly.", true));
-});
-
-// ---------- ADMIN (only you, with the key) ----------
-// Open: https://YOUR-SITE/admin?key=YOUR_ADMIN_KEY
-const isAdmin = k => ADMIN_KEY && String(k || '') === ADMIN_KEY;
-
-app.get('/admin', (req, res) => {
-  if (!isAdmin(req.query.key)) return res.status(403).send('Forbidden');
-  const rows = Object.values(requests).filter(r => r.status === 'pending').map(r => `
-    <div style="background:#262626;padding:12px;border-radius:12px;margin:8px 0">
-      <b>${r.type.toUpperCase()}</b> KSh ${r.amount}<br>${esc(r.phone)}${r.code ? '<br>Code: ' + esc(r.code) : ''}
-      <form method="POST" action="/admin/act" style="margin-top:8px">
-        <input type="hidden" name="key" value="${esc(req.query.key)}"><input type="hidden" name="id" value="${r.id}">
-        <button name="action" value="approve" style="background:#00c853;color:#fff;padding:10px;border:0;border-radius:8px">${r.type === 'deposit' ? 'Approve (credit)' : 'Mark paid'}</button>
-        <button name="action" value="reject" style="background:#d32f2f;color:#fff;padding:10px;border:0;border-radius:8px">Reject</button>
-      </form></div>`).join('');
-  res.send(`<meta name="viewport" content="width=device-width, initial-scale=1"><body style="background:#0a0a0a;color:white;font-family:Arial;padding:20px"><h2>Pending</h2>${rows || 'Nothing pending'}</body>`);
-});
-
-app.post('/admin/act', (req, res) => {
-  if (!isAdmin(req.body.key)) return res.status(403).send('Forbidden');
-  const back = '/admin?key=' + encodeURIComponent(req.body.key);
-  const r = requests[req.body.id];
-  if (!r || r.status !== 'pending') return res.redirect(back);
-  const u = users[r.phone];
-  if (req.body.action === 'approve') {
-    if (r.type === 'deposit') u.balance = round(u.balance + r.amount);
-    r.status = 'done';
-  } else {
-    if (r.type === 'withdraw') u.balance = round(u.balance + r.amount); // refund
-    r.status = 'rejected';
-  }
-  res.redirect(back);
-});
-
 // ---------- MARKETPLACE ----------
 // Funds are locked (escrow) when an order is posted:
 //   SELL order -> poster's MES is locked
@@ -384,7 +287,44 @@ app.post('/api/market/list', (req, res) => {
 });
 
 // Accept an order and complete it with PIN
-app.post('/api/mark
+app.post('/api/market/accept', (req, res) => {
+  const { orderId, phone, pin } = req.body;
+  const o = orders[orderId];
+  if (!o || o.status !== 'open') return res.json({ success: false, refresh: true, msg: "Order no longer available" });
+  if (o.owner === phone) return res.json({ success: false, msg: "You can't accept your own order" });
+  const taker = authUser(res, phone, pin);
+  if (!taker) return;
+  const owner = users[o.owner];
+
+  if (o.type === 'sell') {
+    // owner sells MES (already locked), taker buys with KSh
+    if (taker.balance < o.ksh) return res.json({ success: false, msg: "Not enough KSh" });
+    taker.balance = round(taker.balance - o.ksh);
+    taker.coins = round(taker.coins + o.mes);
+    owner.balance = round(owner.balance + o.ksh);
+  } else {
+    // owner buys MES (KSh already locked), taker sells MES
+    if (taker.coins < o.mes) return res.json({ success: false, msg: "Not enough MES" });
+    taker.coins = round(taker.coins - o.mes);
+    taker.balance = round(taker.balance + o.ksh);
+    owner.coins = round(owner.coins + o.mes);
+  }
+  o.status = 'done';
+  o.taker = phone;
+  res.json({ success: true, msg: "Order complete with " + owner.name, user: safe(taker) });
+});
+
+// My open orders
+app.post('/api/market/mine', (req, res) => {
+  const { phone } = req.body;
+  const list = Object.values(orders)
+    .filter(o => o.status === 'open' && o.owner === phone)
+    .sort((a, b) => b.created - a.created)
+    .map(o => ({ id: o.id, type: o.type, mes: o.mes, price: o.price, ksh: o.ksh }));
+  res.json({ orders: list });
+});
+
+// Cancel my order (PIN required) and get locked funds back
 app.post('/api/market/cancel', (req, res) => {
   const { orderId, phone, pin } = req.body;
   const o = orders[orderId];
@@ -399,3 +339,4 @@ app.post('/api/market/cancel', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Running on " + PORT));
+    
