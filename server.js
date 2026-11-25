@@ -3,39 +3,21 @@ const crypto = require('crypto');
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-let requests = {};
 const TILL = process.env.TILL || '123456'; // PUT YOUR TILL NUMBER HERE
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
-const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const page = (msg, ok) => `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
-body{background:#0a0a0a;color:white;font-family:Arial;padding:20px}
-.card{background:#1a1a1a;padding:18px;border-radius:15px}
-a{display:block;text-align:center;background:#FFD700;color:#000;padding:14px;border-radius:10px;font-weight:bold;text-decoration:none;margin-top:12px}
-</style></head><body><div class="card"><h3>${ok ? '✅' : '❌'}</h3><p>${esc(msg)}</p><a href="/">← Back to Mescoin</a></div></body></html>`;
-// ---------- DATA (in memory: resets on restart. Use a real DB for real balances) ----------
-let users = {};
-let orders = {}; // marketplace orders posted by users
-
-// ---------- HELPERS ----------
+let users = {}, orders = {}, requests = {};
 const round = n => Math.round(n * 100) / 100;
-
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function hashPin(pin) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(pin, salt, 32).toString('hex');
-  return salt + ':' + hash;
+  return salt + ':' + crypto.scryptSync(pin, salt, 32).toString('hex');
 }
 function checkPin(pin, stored) {
   const [salt, hash] = stored.split(':');
-  const test = crypto.scryptSync(String(pin), salt, 32);
-  return crypto.timingSafeEqual(test, Buffer.from(hash, 'hex'));
+  return crypto.timingSafeEqual(crypto.scryptSync(String(pin), salt, 32), Buffer.from(hash, 'hex'));
 }
-function safe(u) {
-  return { name: u.name, phone: u.phone, balance: round(u.balance), coins: round(u.coins) };
-}
-// Special account: the ONLY account that gets bonuses (1000 KSh + 100,000,000 MES, once)
-const BONUS_PHONE = '0768871831';
-const BONUS_KSH = 1000;
-const BONUS_MES = 100000000;
+const safe = u => ({ name: u.name, phone: u.phone, balance: round(u.balance), coins: round(u.coins) });
+const BONUS_PHONE = '0768871831', BONUS_KSH = 1000, BONUS_MES = 100000000;
 function giveBonus(u) {
   if (u.phone === BONUS_PHONE && !u.bonusGiven) {
     u.balance = round(u.balance + BONUS_KSH);
@@ -43,34 +25,28 @@ function giveBonus(u) {
     u.bonusGiven = true;
   }
 }
-function mask(phone) {
-  return phone.slice(0, 4) + '***' + phone.slice(-3);
-}
-
-// PIN attempt limiter: 5 wrong tries = locked 5 minutes
+const mask = p => p.slice(0, 4) + '***' + p.slice(-3);
+const page = (msg, ok) => `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+body{background:#0a0a0a;color:white;font-family:Arial;padding:20px}
+.card{background:#1a1a1a;padding:18px;border-radius:15px}
+a{display:block;text-align:center;background:#FFD700;color:#000;padding:14px;border-radius:10px;font-weight:bold;text-decoration:none;margin-top:12px}
+</style></head><body><div class="card"><h3>${ok ? '✅' : '❌'}</h3><p>${esc(msg)}</p><a href="/">← Back to Mescoin</a></div></body></html>`;
 const attempts = {};
-function locked(phone) {
-  const a = attempts[phone];
-  return a && a.until && Date.now() < a.until;
-}
-function fail(phone) {
-  const a = attempts[phone] || (attempts[phone] = { n: 0, until: 0 });
+const locked = p => attempts[p] && attempts[p].until && Date.now() < attempts[p].until;
+function fail(p) {
+  const a = attempts[p] || (attempts[p] = { n: 0, until: 0 });
   a.n++;
-  if (a.n >= 5) { a.until = Date.now() + 5 * 60 * 1000; a.n = 0; }
+  if (a.n >= 5) { a.until = Date.now() + 300000; a.n = 0; }
 }
-function ok(phone) { delete attempts[phone]; }
-
-// returns user if PIN is right, otherwise sends an error response and returns null
 function authUser(res, phone, pin) {
   const u = users[phone];
   if (!u) { res.json({ success: false, msg: "No account" }); return null; }
   if (locked(phone)) { res.json({ success: false, msg: "Too many wrong PINs. Try again in 5 minutes" }); return null; }
   if (!checkPin(String(pin || ''), u.pin)) { fail(phone); res.json({ success: false, msg: "Wrong PIN" }); return null; }
-  ok(phone);
+  delete attempts[phone];
   return u;
 }
 
-// ---------- HTML ----------
 const HTML = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mescoin</title><style>
 body{background:#0a0a0a;color:white;font-family:Arial;padding:20px}
 h1{text-align:center;color:#FFD700}
@@ -82,23 +58,21 @@ button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;m
 .ord{background:#262626;padding:12px;border-radius:12px;margin:8px 0;cursor:pointer;border:1px solid #333}
 .ord:hover{border-color:#FFD700}
 .ord small{color:#aaa}
+summary{cursor:pointer;padding:4px 0}
+details[open] summary{color:#FFD700}
 #detail{background:#262626;padding:14px;border-radius:12px;margin-top:10px;border:1px solid #FFD700}
 #note{color:#FFD700;min-height:20px}
 </style></head><body><h1>🪙 MESCOIN</h1>
-
 <div id="loginPage" class="card"><h2>Welcome</h2>
 <input id="name" placeholder="Your Name"><input id="phone" placeholder="Phone e.g 0722000000"><input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="4-digit PIN e.g 1234">
 <button class="yellow" onclick="signup()">CREATE ACCOUNT</button><button class="green" onclick="login()">LOGIN</button><p id="msg"></p></div>
-
 <div id="appPage" class="card" style="display:none">
 <h3>Hello <span id="uName"></span></h3>
 <p>Balance: KSh <b id="bal">0</b> | Coins: <b id="coins">0</b> MES</p>
 <p id="note"></p>
-
 <div id="homeView">
 <div class="row"><button class="yellow" onclick="openMarket('buy')">BUY</button><button class="green" onclick="openMarket('sell')">SELL</button></div>
 <button class="grey" onclick="openMine()">MY ORDERS</button>
-<hr><h3>Send Mescoin</h3>
 <details class="ord"><summary><b>💰 DEPOSIT</b></summary>
 <form method="POST" action="/deposit">
 <small>Pay by M-Pesa Buy Goods to Till <b>${TILL}</b>, then enter the code from the M-Pesa message.</small>
@@ -107,18 +81,17 @@ button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;m
 <input name="code" placeholder="M-Pesa code e.g. SGH7XXXXXX" required>
 <input name="pin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN" required>
 <button class="green">SUBMIT DEPOSIT</button></form></details>
-
 <details class="ord"><summary><b>🏧 WITHDRAW</b></summary>
 <form method="POST" action="/withdraw">
 <input name="phone" placeholder="Your phone" required>
 <input name="amount" type="number" placeholder="Amount KSh" required>
 <input name="pin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN" required>
 <button class="yellow">REQUEST WITHDRAWAL</button></form></details>
+<hr><h3>Send Mescoin</h3>
 <input id="toPhone" placeholder="To Phone - must have account"><input id="sendMes" type="number" placeholder="MES to send"><input id="sendPin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN">
 <button class="yellow" onclick="sendCoin()">SEND</button>
 <button class="grey" onclick="location.reload()">Logout</button>
 </div>
-
 <div id="marketView" style="display:none">
 <button class="grey" onclick="go('home')">← Back</button>
 <h3 id="mTitle"></h3>
@@ -134,7 +107,6 @@ button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;m
 <input id="pPin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN">
 <button class="yellow" onclick="postOrder()">POST ORDER</button>
 </div>
-
 <div id="mineView" style="display:none">
 <button class="grey" onclick="go('home')">← Back</button>
 <h3>My open orders</h3>
@@ -142,7 +114,6 @@ button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;m
 <div id="mineList"></div>
 </div>
 </div>
-
 <script>
 let myPhone="",mode="",cur=null;
 function $(i){return document.getElementById(i)}
@@ -152,12 +123,9 @@ async function post(url,body){let r=await fetch(url,{method:'POST',headers:{'Con
 function go(v){['home','market','mine'].forEach(x=>{$(x+'View').style.display=(x===v)?'block':'none';});note('');}
 function show(u){$('uName').innerText=u.name;$('bal').innerText=u.balance;$('coins').innerText=u.coins;}
 function enter(u){myPhone=u.phone;$('loginPage').style.display='none';$('appPage').style.display='block';show(u);go('home');}
-
 async function signup(){let d=await post('/api/signup',{name:$('name').value,phone:$('phone').value,pin:$('pin').value});$('msg').innerText=d.msg;if(d.success)enter(d.user);}
 async function login(){let d=await post('/api/login',{phone:$('phone').value,pin:$('pin').value});$('msg').innerText=d.msg;if(d.success)enter(d.user);}
 async function sendCoin(){let d=await post('/api/send',{fromPhone:myPhone,toPhone:$('toPhone').value,coins:parseFloat($('sendMes').value),pin:$('sendPin').value});note(d.msg);$('sendPin').value='';if(d.success)show(d.user);}
-
-// ----- ORDER PAGE -----
 async function openMarket(m){
   mode=m;
   $('mTitle').innerText=(m==='buy')?'Buy MES - pick a seller':'Sell MES - pick a buyer';
@@ -197,8 +165,6 @@ async function postOrder(){
   note(d.msg);$('pPin').value='';
   if(d.success){show(d.user);$('pMes').value='';$('pPrice').value='';}
 }
-
-// ----- MY ORDERS -----
 async function openMine(){go('mine');$('cPin').value='';await loadMine();}
 async function loadMine(){
   let d=await post('/api/market/mine',{phone:myPhone});
@@ -224,25 +190,16 @@ async function cancelOrder(id){
 
 app.get('/', (req, res) => res.send(HTML));
 
-// ---------- AUTH ----------
 app.post('/api/signup', (req, res) => {
   let { name, phone, pin } = req.body;
-  name = String(name || '').trim();
-  phone = String(phone || '').trim();
-  pin = String(pin || '');
+  name = String(name || '').trim(); phone = String(phone || '').trim(); pin = String(pin || '');
   if (name.length < 2 || name.length > 40) return res.json({ success: false, msg: "Enter a valid name" });
   if (!/^\d{9,13}$/.test(phone)) return res.json({ success: false, msg: "Enter a valid phone number" });
   if (!/^\d{4}$/.test(pin)) return res.json({ success: false, msg: "PIN must be 4 digits" });
   if (users[phone]) return res.json({ success: false, msg: "Account already exists. Please LOGIN" });
-  // Everyone starts with 0 KSh and 0 MES. Only BONUS_PHONE gets a bonus (via giveBonus).
   users[phone] = { name, phone, pin: hashPin(pin), coins: 0, balance: 0 };
   giveBonus(users[phone]);
-  const isBonus = phone === BONUS_PHONE;
-  res.json({
-    success: true,
-    msg: isBonus ? "Account Created! Bonus added" : "Account Created!",
-    user: safe(users[phone])
-  });
+  res.json({ success: true, msg: phone === BONUS_PHONE ? "Account Created! Bonus added" : "Account Created!", user: safe(users[phone]) });
 });
 
 app.post('/api/login', (req, res) => {
@@ -254,7 +211,6 @@ app.post('/api/login', (req, res) => {
   res.json({ success: true, msg: "Welcome " + u.name, user: safe(u) });
 });
 
-// ---------- SEND (PIN required) ----------
 app.post('/api/send', (req, res) => {
   const { fromPhone, toPhone, pin } = req.body;
   const coins = Number(req.body.coins);
@@ -269,155 +225,6 @@ app.post('/api/send', (req, res) => {
   res.json({ success: true, msg: "Sent " + coins + " MES to " + users[toPhone].name, user: safe(from) });
 });
 
-// ---------- MARKETPLACE ----------
-// Funds are locked (escrow) when an order is posted:
-//   SELL order -> poster's MES is locked
-//   BUY order  -> poster's KSh is locked
-// Locked funds go back to the poster if they cancel.
-
-// Post an order (PIN required)
-app.post('/api/market/post', (req, res) => {
-  const { phone, type, pin } = req.body;
-  const mes = round(Number(req.body.mes));
-  const price = round(Number(req.body.price));
-  if (!['buy', 'sell'].includes(type)) return res.json({ success: false, msg: "Invalid order type" });
-  if (!(mes > 0) || !(price > 0) || mes > 1e9 || price > 1e6) return res.json({ success: false, msg: "Enter a valid amount and price" });
-  const ksh = round(mes * price);
-  if (!(ksh > 0)) return res.json({ success: false, msg: "Order too small" });
-  const u = authUser(res, phone, pin);
-  if (!u) return;
-  if (type === 'sell') {
-    if (u.coins < mes) return res.json({ success: false, msg: "Not enough MES" });
-    u.coins = round(u.coins - mes);
-  } else {
-    if (u.balance < ksh) return res.json({ success: false, msg: "Not enough KSh" });
-    u.balance = round(u.balance - ksh);
-  }
-  const id = crypto.randomBytes(8).toString('hex');
-  orders[id] = { id, owner: phone, type, mes, price, ksh, status: 'open', created: Date.now() };
-  res.json({ success: true, msg: "Order posted. Your " + (type === 'sell' ? mes + " MES is" : "KSh " + ksh + " is") + " locked until someone accepts or you cancel.", user: safe(u) });
-});
-
-// List open orders of one type from OTHER users (everyone can see them)
-app.post('/api/market/list', (req, res) => {
-  const { phone, type } = req.body;
-  if (!users[phone] || !['buy', 'sell'].includes(type)) return res.json({ orders: [] });
-  const list = Object.values(orders)
-    .filter(o => o.status === 'open' && o.type === type && o.owner !== phone)
-    .sort((a, b) => b.created - a.created)
-    .slice(0, 50)
-    .map(o => ({ id: o.id, ownerName: users[o.owner].name, ownerPhone: mask(o.owner), type: o.type, mes: o.mes, price: o.price, ksh: o.ksh }));
-  res.json({ orders: list });
-});
-
-// Accept an order and complete it with PIN
-app.post('/api/market/accept', (req, res) => {
-  const { orderId, phone, pin } = req.body;
-  const o = orders[orderId];
-  if (!o || o.status !== 'open') return res.json({ success: false, refresh: true, msg: "Order no longer available" });
-  if (o.owner === phone) return res.json({ success: false, msg: "You can't accept your own order" });
-  const taker = authUser(res, phone, pin);
-  if (!taker) return;
-  const owner = users[o.owner];
-
-  if (o.type === 'sell') {
-    // owner sells MES (already locked), taker buys with KSh
-    if (taker.balance < o.ksh) return res.json({ success: false, msg: "Not enough KSh" });
-    taker.balance = round(taker.balance - o.ksh);
-    taker.coins = round(taker.coins + o.mes);
-    owner.balance = round(owner.balance + o.ksh);
-  } else {
-    // owner buys MES (KSh already locked), taker sells MES
-    if (taker.coins < o.mes) return res.json({ success: false, msg: "Not enough MES" });
-    taker.coins = round(taker.coins - o.mes);
-    taker.balance = round(taker.balance + o.ksh);
-    owner.coins = round(owner.coins + o.mes);
-  }
-  o.status = 'done';
-  o.taker = phone;
-  res.json({ success: true, msg: "Order complete with " + owner.name, user: safe(taker) });
-});
-
-// My open orders
-app.post('/api/market/mine', (req, res) => {
-  const { phone } = req.body;
-  const list = Object.values(orders)
-    .filter(o => o.status === 'open' && o.owner === phone)
-    .sort((a, b) => b.created - a.created)
-    .map(o => ({ id: o.id, type: o.type, mes: o.mes, price: o.price, ksh: o.ksh }));
-  res.json({ orders: list });
-});
-
-// Cancel my order (PIN required) and get locked funds back
-app.post('/api/market/cancel', (req, res) => {
-  const { orderId, phone, pin } = req.body;
-  const o = orders[orderId];
-  if (!o || o.status !== 'open' || o.owner !== phone) return res.json({ success: false, refresh: true, msg: "Order not found" });
-  const u = authUser(res, phone, pin);
-  if (!u) return;
-  if (o.type === 'sell') u.coins = round(u.coins + o.mes);
-  else u.balance = round(u.balance + o.ksh);
-  o.status = 'cancelled';
-  res.json({ success: true, msg: "Order cancelled. Funds returned.", user: safe(u) });
-});
-app.post('/deposit', (req, res) => {
-  const phone = String(req.body.phone || '').trim();
-  const amount = round(Number(req.body.amount));
-  const code = String(req.body.code || '').trim().toUpperCase();
-  if (!(amount >= 10 && amount <= 150000)) return res.send(page("Amount must be KSh 10 - 150,000"));
-  if (!/^[A-Z0-9]{8,12}$/.test(code)) return res.send(page("Enter the M-Pesa transaction code"));
-  if (Object.values(requests).some(r => r.type === 'deposit' && r.code === code))
-    return res.send(page("That code was already submitted"));
-  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
-  if (!u) return;
-  const id = crypto.randomBytes(8).toString('hex');
-  requests[id] = { id, type: 'deposit', phone, amount, code, status: 'pending', created: Date.now() };
-  res.send(page("Deposit of KSh " + amount + " received. It will be added once confirmed.", true));
-});
-
-app.post('/withdraw', (req, res) => {
-  const phone = String(req.body.phone || '').trim();
-  const amount = round(Number(req.body.amount));
-  if (!(amount >= 50 && amount <= 150000)) return res.send(page("Amount must be KSh 50 - 150,000"));
-  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
-  if (!u) return;
-  if (u.balance < amount) return res.send(page("Not enough KSh"));
-  u.balance = round(u.balance - amount);
-  const id = crypto.randomBytes(8).toString('hex');
-  requests[id] = { id, type: 'withdraw', phone, amount, status: 'pending', created: Date.now() };
-  res.send(page("Withdrawal of KSh " + amount + " requested. It will be sent to " + phone + " shortly.", true));
-});
-
-const isAdmin = k => ADMIN_KEY && String(k || '') === ADMIN_KEY;
-
-app.get('/admin', (req, res) => {
-  if (!isAdmin(req.query.key)) return res.status(403).send('Forbidden');
-  const rows = Object.values(requests).filter(r => r.status === 'pending').map(r => `
-    <div style="background:#262626;padding:12px;border-radius:12px;margin:8px 0">
-      <b>${r.type.toUpperCase()}</b> KSh ${r.amount}<br>${esc(r.phone)}${r.code ? '<br>Code: ' + esc(r.code) : ''}
-      <form method="POST" action="/admin/act" style="margin-top:8px">
-        <input type="hidden" name="key" value="${esc(req.query.key)}"><input type="hidden" name="id" value="${r.id}">
-        <button name="action" value="approve" style="background:#00c853;color:#fff;padding:10px;border:0;border-radius:8px">${r.type === 'deposit' ? 'Approve (credit)' : 'Mark paid'}</button>
-        <button name="action" value="reject" style="background:#d32f2f;color:#fff;padding:10px;border:0;border-radius:8px">Reject</button>
-      </form></div>`).join('');
-  res.send(`<meta name="viewport" content="width=device-width, initial-scale=1"><body style="background:#0a0a0a;color:white;font-family:Arial;padding:20px"><h2>Pending</h2>${rows || 'Nothing pending'}</body>`);
-});
-
-app.post('/admin/act', (req, res) => {
-  if (!isAdmin(req.body.key)) return res.status(403).send('Forbidden');
-  const back = '/admin?key=' + encodeURIComponent(req.body.key);
-  const r = requests[req.body.id];
-  if (!r || r.status !== 'pending') return res.redirect(back);
-  const u = users[r.phone];
-  if (req.body.action === 'approve') {
-    if (r.type === 'deposit') u.balance = round(u.balance + r.amount);
-    r.status = 'done';
-  } else {
-    if (r.type === 'withdraw') u.balance = round(u.balance + r.amount);
-    r.status = 'rejected';
-  }
-  res.redirect(back);
-}); 
 app.post('/deposit', (req, res) => {
   const phone = String(req.body.phone || '').trim();
   const amount = round(Number(req.body.amount));
@@ -473,7 +280,82 @@ app.post('/admin/act', (req, res) => {
   }
   res.redirect(back);
 });
+
+app.post('/api/market/post', (req, res) => {
+  const { phone, type, pin } = req.body;
+  const mes = round(Number(req.body.mes)), price = round(Number(req.body.price));
+  if (!['buy', 'sell'].includes(type)) return res.json({ success: false, msg: "Invalid order type" });
+  if (!(mes > 0) || !(price > 0) || mes > 1e9 || price > 1e6) return res.json({ success: false, msg: "Enter a valid amount and price" });
+  const ksh = round(mes * price);
+  if (!(ksh > 0)) return res.json({ success: false, msg: "Order too small" });
+  const u = authUser(res, phone, pin);
+  if (!u) return;
+  if (type === 'sell') {
+    if (u.coins < mes) return res.json({ success: false, msg: "Not enough MES" });
+    u.coins = round(u.coins - mes);
+  } else {
+    if (u.balance < ksh) return res.json({ success: false, msg: "Not enough KSh" });
+    u.balance = round(u.balance - ksh);
+  }
+  const id = crypto.randomBytes(8).toString('hex');
+  orders[id] = { id, owner: phone, type, mes, price, ksh, status: 'open', created: Date.now() };
+  res.json({ success: true, msg: "Order posted. Your " + (type === 'sell' ? mes + " MES is" : "KSh " + ksh + " is") + " locked until someone accepts or you cancel.", user: safe(u) });
+});
+
+app.post('/api/market/list', (req, res) => {
+  const { phone, type } = req.body;
+  if (!users[phone] || !['buy', 'sell'].includes(type)) return res.json({ orders: [] });
+  const list = Object.values(orders)
+    .filter(o => o.status === 'open' && o.type === type && o.owner !== phone)
+    .sort((a, b) => b.created - a.created).slice(0, 50)
+    .map(o => ({ id: o.id, ownerName: users[o.owner].name, ownerPhone: mask(o.owner), type: o.type, mes: o.mes, price: o.price, ksh: o.ksh }));
+  res.json({ orders: list });
+});
+
+app.post('/api/market/accept', (req, res) => {
+  const { orderId, phone, pin } = req.body;
+  const o = orders[orderId];
+  if (!o || o.status !== 'open') return res.json({ success: false, refresh: true, msg: "Order no longer available" });
+  if (o.owner === phone) return res.json({ success: false, msg: "You can't accept your own order" });
+  const taker = authUser(res, phone, pin);
+  if (!taker) return;
+  const owner = users[o.owner];
+  if (o.type === 'sell') {
+    if (taker.balance < o.ksh) return res.json({ success: false, msg: "Not enough KSh" });
+    taker.balance = round(taker.balance - o.ksh);
+    taker.coins = round(taker.coins + o.mes);
+    owner.balance = round(owner.balance + o.ksh);
+  } else {
+    if (taker.coins < o.mes) return res.json({ success: false, msg: "Not enough MES" });
+    taker.coins = round(taker.coins - o.mes);
+    taker.balance = round(taker.balance + o.ksh);
+    owner.coins = round(owner.coins + o.mes);
+  }
+  o.status = 'done';
+  o.taker = phone;
+  res.json({ success: true, msg: "Order complete with " + owner.name, user: safe(taker) });
+});
+
+app.post('/api/market/mine', (req, res) => {
+  const list = Object.values(orders)
+    .filter(o => o.status === 'open' && o.owner === req.body.phone)
+    .sort((a, b) => b.created - a.created)
+    .map(o => ({ id: o.id, type: o.type, mes: o.mes, price: o.price, ksh: o.ksh }));
+  res.json({ orders: list });
+});
+
+app.post('/api/market/cancel', (req, res) => {
+  const { orderId, phone, pin } = req.body;
+  const o = orders[orderId];
+  if (!o || o.status !== 'open' || o.owner !== phone) return res.json({ success: false, refresh: true, msg: "Order not found" });
+  const u = authUser(res, phone, pin);
+  if (!u) return;
+  if (o.type === 'sell') u.coins = round(u.coins + o.mes);
+  else u.balance = round(u.balance + o.ksh);
+  o.status = 'cancelled';
+  res.json({ success: true, msg: "Order cancelled. Funds returned.", user: safe(u) });
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Running on " + PORT));
-
-                                 
+  
