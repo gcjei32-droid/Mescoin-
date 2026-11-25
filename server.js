@@ -336,7 +336,64 @@ app.post('/api/market/cancel', (req, res) => {
   o.status = 'cancelled';
   res.json({ success: true, msg: "Order cancelled. Funds returned.", user: safe(u) });
 });
+app.post('/deposit', (req, res) => {
+  const phone = String(req.body.phone || '').trim();
+  const amount = round(Number(req.body.amount));
+  const code = String(req.body.code || '').trim().toUpperCase();
+  if (!(amount >= 10 && amount <= 150000)) return res.send(page("Amount must be KSh 10 - 150,000"));
+  if (!/^[A-Z0-9]{8,12}$/.test(code)) return res.send(page("Enter the M-Pesa transaction code"));
+  if (Object.values(requests).some(r => r.type === 'deposit' && r.code === code))
+    return res.send(page("That code was already submitted"));
+  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
+  if (!u) return;
+  const id = crypto.randomBytes(8).toString('hex');
+  requests[id] = { id, type: 'deposit', phone, amount, code, status: 'pending', created: Date.now() };
+  res.send(page("Deposit of KSh " + amount + " received. It will be added once confirmed.", true));
+});
 
+app.post('/withdraw', (req, res) => {
+  const phone = String(req.body.phone || '').trim();
+  const amount = round(Number(req.body.amount));
+  if (!(amount >= 50 && amount <= 150000)) return res.send(page("Amount must be KSh 50 - 150,000"));
+  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
+  if (!u) return;
+  if (u.balance < amount) return res.send(page("Not enough KSh"));
+  u.balance = round(u.balance - amount);
+  const id = crypto.randomBytes(8).toString('hex');
+  requests[id] = { id, type: 'withdraw', phone, amount, status: 'pending', created: Date.now() };
+  res.send(page("Withdrawal of KSh " + amount + " requested. It will be sent to " + phone + " shortly.", true));
+});
+
+const isAdmin = k => ADMIN_KEY && String(k || '') === ADMIN_KEY;
+
+app.get('/admin', (req, res) => {
+  if (!isAdmin(req.query.key)) return res.status(403).send('Forbidden');
+  const rows = Object.values(requests).filter(r => r.status === 'pending').map(r => `
+    <div style="background:#262626;padding:12px;border-radius:12px;margin:8px 0">
+      <b>${r.type.toUpperCase()}</b> KSh ${r.amount}<br>${esc(r.phone)}${r.code ? '<br>Code: ' + esc(r.code) : ''}
+      <form method="POST" action="/admin/act" style="margin-top:8px">
+        <input type="hidden" name="key" value="${esc(req.query.key)}"><input type="hidden" name="id" value="${r.id}">
+        <button name="action" value="approve" style="background:#00c853;color:#fff;padding:10px;border:0;border-radius:8px">${r.type === 'deposit' ? 'Approve (credit)' : 'Mark paid'}</button>
+        <button name="action" value="reject" style="background:#d32f2f;color:#fff;padding:10px;border:0;border-radius:8px">Reject</button>
+      </form></div>`).join('');
+  res.send(`<meta name="viewport" content="width=device-width, initial-scale=1"><body style="background:#0a0a0a;color:white;font-family:Arial;padding:20px"><h2>Pending</h2>${rows || 'Nothing pending'}</body>`);
+});
+
+app.post('/admin/act', (req, res) => {
+  if (!isAdmin(req.body.key)) return res.status(403).send('Forbidden');
+  const back = '/admin?key=' + encodeURIComponent(req.body.key);
+  const r = requests[req.body.id];
+  if (!r || r.status !== 'pending') return res.redirect(back);
+  const u = users[r.phone];
+  if (req.body.action === 'approve') {
+    if (r.type === 'deposit') u.balance = round(u.balance + r.amount);
+    r.status = 'done';
+  } else {
+    if (r.type === 'withdraw') u.balance = round(u.balance + r.amount);
+    r.status = 'rejected';
+  }
+  res.redirect(back);
+});
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Running on " + PORT));
     
