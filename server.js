@@ -2,7 +2,16 @@ const express = require('express');
 const crypto = require('crypto');
 const app = express();
 app.use(express.json());
-
+app.use(express.urlencoded({ extended: false }));
+let requests = {};
+const TILL = process.env.TILL || '123456'; // PUT YOUR TILL NUMBER HERE
+const ADMIN_KEY = process.env.ADMIN_KEY || '';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const page = (msg, ok) => `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+body{background:#0a0a0a;color:white;font-family:Arial;padding:20px}
+.card{background:#1a1a1a;padding:18px;border-radius:15px}
+a{display:block;text-align:center;background:#FFD700;color:#000;padding:14px;border-radius:10px;font-weight:bold;text-decoration:none;margin-top:12px}
+</style></head><body><div class="card"><h3>${ok ? '✅' : '❌'}</h3><p>${esc(msg)}</p><a href="/">← Back to Mescoin</a></div></body></html>`;
 // ---------- DATA (in memory: resets on restart. Use a real DB for real balances) ----------
 let users = {};
 let orders = {}; // marketplace orders posted by users
@@ -90,6 +99,21 @@ button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;m
 <div class="row"><button class="yellow" onclick="openMarket('buy')">BUY</button><button class="green" onclick="openMarket('sell')">SELL</button></div>
 <button class="grey" onclick="openMine()">MY ORDERS</button>
 <hr><h3>Send Mescoin</h3>
+<details class="ord"><summary><b>💰 DEPOSIT</b></summary>
+<form method="POST" action="/deposit">
+<small>Pay by M-Pesa Buy Goods to Till <b>${TILL}</b>, then enter the code from the M-Pesa message.</small>
+<input name="phone" placeholder="Your phone" required>
+<input name="amount" type="number" placeholder="Amount KSh" required>
+<input name="code" placeholder="M-Pesa code e.g. SGH7XXXXXX" required>
+<input name="pin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN" required>
+<button class="green">SUBMIT DEPOSIT</button></form></details>
+
+<details class="ord"><summary><b>🏧 WITHDRAW</b></summary>
+<form method="POST" action="/withdraw">
+<input name="phone" placeholder="Your phone" required>
+<input name="amount" type="number" placeholder="Amount KSh" required>
+<input name="pin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN" required>
+<button class="yellow">REQUEST WITHDRAWAL</button></form></details>
 <input id="toPhone" placeholder="To Phone - must have account"><input id="sendMes" type="number" placeholder="MES to send"><input id="sendPin" type="password" inputmode="numeric" maxlength="4" placeholder="Your PIN">
 <button class="yellow" onclick="sendCoin()">SEND</button>
 <button class="grey" onclick="location.reload()">Logout</button>
@@ -379,6 +403,61 @@ app.get('/admin', (req, res) => {
   res.send(`<meta name="viewport" content="width=device-width, initial-scale=1"><body style="background:#0a0a0a;color:white;font-family:Arial;padding:20px"><h2>Pending</h2>${rows || 'Nothing pending'}</body>`);
 });
 
+app.post('/admin/act', (req, res) => {
+  if (!isAdmin(req.body.key)) return res.status(403).send('Forbidden');
+  const back = '/admin?key=' + encodeURIComponent(req.body.key);
+  const r = requests[req.body.id];
+  if (!r || r.status !== 'pending') return res.redirect(back);
+  const u = users[r.phone];
+  if (req.body.action === 'approve') {
+    if (r.type === 'deposit') u.balance = round(u.balance + r.amount);
+    r.status = 'done';
+  } else {
+    if (r.type === 'withdraw') u.balance = round(u.balance + r.amount);
+    r.status = 'rejected';
+  }
+  res.redirect(back);
+}); 
+app.post('/deposit', (req, res) => {
+  const phone = String(req.body.phone || '').trim();
+  const amount = round(Number(req.body.amount));
+  const code = String(req.body.code || '').trim().toUpperCase();
+  if (!(amount >= 10 && amount <= 150000)) return res.send(page("Amount must be KSh 10 - 150,000"));
+  if (!/^[A-Z0-9]{8,12}$/.test(code)) return res.send(page("Enter the M-Pesa transaction code"));
+  if (Object.values(requests).some(r => r.type === 'deposit' && r.code === code)) return res.send(page("That code was already submitted"));
+  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
+  if (!u) return;
+  const id = crypto.randomBytes(8).toString('hex');
+  requests[id] = { id, type: 'deposit', phone, amount, code, status: 'pending' };
+  res.send(page("Deposit of KSh " + amount + " received. It will be added once confirmed.", true));
+});
+
+app.post('/withdraw', (req, res) => {
+  const phone = String(req.body.phone || '').trim();
+  const amount = round(Number(req.body.amount));
+  if (!(amount >= 50 && amount <= 150000)) return res.send(page("Amount must be KSh 50 - 150,000"));
+  const u = authUser({ json: o => res.send(page(o.msg)) }, phone, req.body.pin);
+  if (!u) return;
+  if (u.balance < amount) return res.send(page("Not enough KSh"));
+  u.balance = round(u.balance - amount);
+  const id = crypto.randomBytes(8).toString('hex');
+  requests[id] = { id, type: 'withdraw', phone, amount, status: 'pending' };
+  res.send(page("Withdrawal of KSh " + amount + " requested. It will be sent to " + phone + " shortly.", true));
+});
+
+const isAdmin = k => ADMIN_KEY && String(k || '') === ADMIN_KEY;
+app.get('/admin', (req, res) => {
+  if (!isAdmin(req.query.key)) return res.status(403).send('Forbidden');
+  const rows = Object.values(requests).filter(r => r.status === 'pending').map(r => `
+    <div style="background:#262626;padding:12px;border-radius:12px;margin:8px 0">
+      <b>${r.type.toUpperCase()}</b> KSh ${r.amount}<br>${esc(r.phone)}${r.code ? '<br>Code: ' + esc(r.code) : ''}
+      <form method="POST" action="/admin/act" style="margin-top:8px">
+        <input type="hidden" name="key" value="${esc(req.query.key)}"><input type="hidden" name="id" value="${r.id}">
+        <button name="action" value="approve" style="background:#00c853;color:#fff;padding:10px;border:0;border-radius:8px">${r.type === 'deposit' ? 'Approve (credit)' : 'Mark paid'}</button>
+        <button name="action" value="reject" style="background:#d32f2f;color:#fff;padding:10px;border:0;border-radius:8px">Reject</button>
+      </form></div>`).join('');
+  res.send(`<meta name="viewport" content="width=device-width, initial-scale=1"><body style="background:#0a0a0a;color:white;font-family:Arial;padding:20px"><h2>Pending</h2>${rows || 'Nothing pending'}</body>`);
+});
 app.post('/admin/act', (req, res) => {
   if (!isAdmin(req.body.key)) return res.status(403).send('Forbidden');
   const back = '/admin?key=' + encodeURIComponent(req.body.key);
