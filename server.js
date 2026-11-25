@@ -385,3 +385,17 @@ app.post('/api/market/list', (req, res) => {
 
 // Accept an order and complete it with PIN
 app.post('/api/mark
+app.post('/api/market/cancel', (req, res) => {
+  const { orderId, phone, pin } = req.body;
+  const o = orders[orderId];
+  if (!o || o.status !== 'open' || o.owner !== phone) return res.json({ success: false, refresh: true, msg: "Order not found" });
+  const u = authUser(res, phone, pin);
+  if (!u) return;
+  if (o.type === 'sell') u.coins = round(u.coins + o.mes);
+  else u.balance = round(u.balance + o.ksh);
+  o.status = 'cancelled';
+  res.json({ success: true, msg: "Order cancelled. Funds returned.", user: safe(u) });
+});
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("Running on " + PORT));
