@@ -1,29 +1,96 @@
 const express = require('express');
 const crypto = require('crypto');
+const { Pool } = require('pg');
+
 const app = express();
 app.use(express.json());
 
-const HOST_PHONE = '0768871831';
+const HOST_PHONE = String(process.env.HOST_PHONE || '').trim();
 const BONUS_MES = 100000000;
-let users = {}, orders = {}, trades = {}, sessions = {};
+if (!HOST_PHONE) console.warn('HOST_PHONE is not set: there will be no host account');
+if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is missing'); process.exit(1); }
 
-const round = n => Math.round(n * 100) / 100;
+const dbUrl = process.env.DATABASE_URL;
+const pool = new Pool({
+  connectionString: dbUrl,
+  ssl: /\.render\.com/.test(dbUrl) ? { rejectUnauthorized: false } : false
+});
+pool.on('error', e => console.error('pool error', e.message));
+
+const n = Number;
+const round = x => Math.round(x * 100) / 100;
+const q = (sql, p) => pool.query(sql, p);
+const isHost = u => !!HOST_PHONE && u.phone === HOST_PHONE;
+const safe = u => ({ name: u.name, phone: u.phone, coins: round(n(u.coins)), isHost: isHost(u) });
+const mask = p => p.slice(0, 4) + '***' + p.slice(-3);
+
+async function initDb() {
+  await q(`
+    CREATE TABLE IF NOT EXISTS users (
+      phone TEXT PRIMARY KEY, name TEXT NOT NULL, pin TEXT NOT NULL,
+      coins NUMERIC(24,2) NOT NULL DEFAULT 0 CHECK (coins >= 0),
+      bonus_given BOOLEAN NOT NULL DEFAULT false
+    );
+    CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, phone TEXT NOT NULL, exp BIGINT NOT NULL);
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY, owner_phone TEXT NOT NULL, type TEXT NOT NULL,
+      mes NUMERIC(24,2) NOT NULL, price NUMERIC(24,2) NOT NULL, ksh NUMERIC(24,2) NOT NULL,
+      status TEXT NOT NULL, created BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS trades (
+      id TEXT PRIMARY KEY, order_id TEXT NOT NULL, seller TEXT NOT NULL, buyer TEXT NOT NULL,
+      mes NUMERIC(24,2) NOT NULL, price NUMERIC(24,2) NOT NULL, ksh NUMERIC(24,2) NOT NULL,
+      status TEXT NOT NULL, report_by TEXT, report_reason TEXT, created BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY, trade_id TEXT NOT NULL, sender TEXT NOT NULL,
+      name TEXT NOT NULL, body TEXT NOT NULL, created BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_trade ON messages(trade_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, type);
+  `);
+}
+
+async function tx(fn) {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const r = await fn(c);
+    await c.query('COMMIT');
+    return r;
+  } catch (e) {
+    try { await c.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally { c.release(); }
+}
+async function lockUsers(c, phones) {
+  const r = await c.query('SELECT * FROM users WHERE phone = ANY($1) ORDER BY phone FOR UPDATE', [[...new Set(phones)]]);
+  const m = {};
+  r.rows.forEach(x => { m[x.phone] = x; });
+  return m;
+}
+async function addMsg(c, tid, from, text) {
+  let name = 'System';
+  if (from !== 'system') {
+    if (HOST_PHONE && from === HOST_PHONE) name = 'Host';
+    else {
+      const r = await c.query('SELECT name FROM users WHERE phone=$1', [from]);
+      name = r.rows[0] ? r.rows[0].name : from;
+    }
+  }
+  await c.query('INSERT INTO messages(trade_id,sender,name,body,created) VALUES($1,$2,$3,$4,$5)', [tid, from, name, text, Date.now()]);
+}
+
+// ---------- PIN hashing ----------
 function hashPin(pin) {
   const salt = crypto.randomBytes(16).toString('hex');
   return salt + ':' + crypto.scryptSync(pin, salt, 32).toString('hex');
 }
 function checkPin(pin, stored) {
-  const [salt, hash] = stored.split(':');
+  const [salt, hash] = String(stored).split(':');
+  if (!salt || !hash) return false;
   return crypto.timingSafeEqual(crypto.scryptSync(String(pin), salt, 32), Buffer.from(hash, 'hex'));
 }
-const safe = u => ({ name: u.name, phone: u.phone, coins: round(u.coins), isHost: u.phone === HOST_PHONE });
-function giveBonus(u) {
-  if (u.phone === HOST_PHONE && !u.bonusGiven) {
-    u.coins = round(u.coins + BONUS_MES);
-    u.bonusGiven = true;
-  }
-}
-const mask = p => p.slice(0, 4) + '***' + p.slice(-3);
 
 // ---------- PIN lockout + sessions ----------
 const attempts = {};
@@ -33,28 +100,29 @@ function fail(p) {
   a.n++;
   if (a.n >= 5) { a.until = Date.now() + 300000; a.n = 0; }
 }
-function authUser(res, phone, pin) {
-  const u = users[phone];
+async function authUser(res, phone, pin) {
+  const r = await q('SELECT * FROM users WHERE phone=$1', [phone]);
+  const u = r.rows[0];
   if (!u) { res.json({ success: false, msg: "No account" }); return null; }
   if (locked(phone)) { res.json({ success: false, msg: "Too many wrong PINs. Try again in 5 minutes" }); return null; }
   if (!checkPin(String(pin || ''), u.pin)) { fail(phone); res.json({ success: false, msg: "Wrong PIN" }); return null; }
   delete attempts[phone];
   return u;
 }
-function newSession(phone) {
+async function newSession(phone) {
   const token = crypto.randomBytes(24).toString('hex');
-  sessions[token] = { phone, exp: Date.now() + 12 * 3600 * 1000 };
+  await q('INSERT INTO sessions(token,phone,exp) VALUES($1,$2,$3)', [token, phone, Date.now() + 12 * 3600 * 1000]);
+  q('DELETE FROM sessions WHERE exp < $1', [Date.now()]).catch(() => {});
   return token;
 }
-function sessionUser(req, res) {
-  const s = sessions[String(req.body.token || '')];
-  if (s && Date.now() > s.exp) delete sessions[req.body.token];
-  const u = s && Date.now() <= s.exp && users[s.phone];
-  if (!u) { res.json({ success: false, auth: true, msg: "Session expired. Please login again." }); return null; }
-  return u;
+async function sessionUser(req, res) {
+  const r = await q('SELECT u.* FROM sessions s JOIN users u ON u.phone=s.phone WHERE s.token=$1 AND s.exp>$2',
+    [String(req.body.token || ''), Date.now()]);
+  if (!r.rows[0]) { res.json({ success: false, auth: true, msg: "Session expired. Please login again." }); return null; }
+  return r.rows[0];
 }
-function pinUser(req, res) {
-  const u = sessionUser(req, res);
+async function pinUser(req, res) {
+  const u = await sessionUser(req, res);
   if (!u) return null;
   if (locked(u.phone)) { res.json({ success: false, msg: "Too many wrong PINs. Try again in 5 minutes" }); return null; }
   if (!checkPin(String(req.body.pin || ''), u.pin)) { fail(u.phone); res.json({ success: false, msg: "Wrong PIN" }); return null; }
@@ -62,33 +130,27 @@ function pinUser(req, res) {
   return u;
 }
 
+const route = (p, fn) => app.post(p, (req, res) => {
+  fn(req, res).catch(e => {
+    console.error(p, e);
+    if (!res.headersSent) res.json({ success: false, msg: "Server error. Try again." });
+  });
+});
+
 // ---------- trade helpers ----------
 const OPEN = ['active', 'paid', 'disputed'];
-const isHost = u => u.phone === HOST_PHONE;
 const isParty = (t, u) => u.phone === t.seller || u.phone === t.buyer;
-const canSee = (t, u) => isParty(t, u) || (isHost(u) && !!t.report);
-function addMsg(t, from, text) {
-  const name = from === 'system' ? 'System' : (from === HOST_PHONE ? 'Host' : users[from].name);
-  t.messages.push({ from, name, text, time: Date.now() });
-  if (t.messages.length > 300) t.messages.shift();
-}
-function tradeView(t, me) {
-  return {
-    id: t.id, status: t.status, mes: t.mes, price: t.price, ksh: t.ksh,
-    open: OPEN.includes(t.status),
-    role: me.phone === t.seller ? 'seller' : me.phone === t.buyer ? 'buyer' : 'host',
-    seller: { name: users[t.seller].name, phone: t.seller },
-    buyer: { name: users[t.buyer].name, phone: t.buyer },
-    report: t.report ? { by: users[t.report.by].name, reason: t.report.reason } : null,
-    messages: t.messages.map(m => ({ mine: m.from === me.phone, system: m.from === 'system', name: m.name, text: m.text }))
-  };
+const canSee = (t, u) => isParty(t, u) || (isHost(u) && !!t.report_reason);
+const roleOf = (t, u) => u.phone === t.seller ? 'seller' : u.phone === t.buyer ? 'buyer' : 'host';
+async function loadTrade(id) {
+  const r = await q(`SELECT t.*, s.name AS seller_name, b.name AS buyer_name FROM trades t
+    JOIN users s ON s.phone=t.seller JOIN users b ON b.phone=t.buyer WHERE t.id=$1`, [String(id || '')]);
+  return r.rows[0];
 }
 function tradeSummary(t, me) {
-  const role = me.phone === t.seller ? 'seller' : me.phone === t.buyer ? 'buyer' : 'host';
   return {
-    id: t.id, status: t.status, mes: t.mes, ksh: t.ksh, role,
-    seller: users[t.seller].name, buyer: users[t.buyer].name,
-    reason: t.report ? t.report.reason : ''
+    id: t.id, status: t.status, mes: n(t.mes), ksh: n(t.ksh), role: roleOf(t, me),
+    seller: t.seller_name, buyer: t.buyer_name, reason: t.report_reason || ''
   };
 }
 
@@ -283,8 +345,7 @@ async function refreshTrade(){
   if(!curTrade)return;
   let d=await post('/api/trade/get',{tradeId:curTrade});
   if(!d.success){note(d.msg);stopPoll();return;}
-  renderTrade(d.trade);
-}
+  renderTrade(d.trade);}
 function renderTrade(t){
   lastRole=t.role;
   $('tTitle').innerText=t.mes+' MES for KSh '+t.ksh;
@@ -354,236 +415,292 @@ async function sendChat(){
   if(!d.success)note(d.msg);
   refreshTrade();
 }
-</script></body></html>`;
-  app.get('/', (req, res) => res.send(HTML));
+</script></body></html>
+`;
+app.get('/', (req, res) => res.send(HTML));
 
 // ---------- accounts ----------
-app.post('/api/signup', (req, res) => {
+route('/api/signup', async (req, res) => {
   let { name, phone, pin } = req.body;
   name = String(name || '').trim(); phone = String(phone || '').trim(); pin = String(pin || '');
   if (name.length < 2 || name.length > 40) return res.json({ success: false, msg: "Enter a valid name" });
   if (!/^\d{9,13}$/.test(phone)) return res.json({ success: false, msg: "Enter a valid phone number" });
   if (!/^\d{4}$/.test(pin)) return res.json({ success: false, msg: "PIN must be 4 digits" });
-  if (users[phone]) return res.json({ success: false, msg: "Account already exists. Please LOGIN" });
-  users[phone] = { name, phone, pin: hashPin(pin), coins: 0 };
-  giveBonus(users[phone]);
-  res.json({ success: true, msg: phone === HOST_PHONE ? "Account Created! Bonus added" : "Account Created!", user: safe(users[phone]), token: newSession(phone) });
+  const host = !!HOST_PHONE && phone === HOST_PHONE;
+  const r = await q(`INSERT INTO users(phone,name,pin,coins,bonus_given) VALUES($1,$2,$3,$4,$5)
+    ON CONFLICT (phone) DO NOTHING RETURNING *`, [phone, name, hashPin(pin), host ? BONUS_MES : 0, host]);
+  if (!r.rows[0]) return res.json({ success: false, msg: "Account already exists. Please LOGIN" });
+  res.json({ success: true, msg: host ? "Account Created! Bonus added" : "Account Created!", user: safe(r.rows[0]), token: await newSession(phone) });
 });
 
-app.post('/api/login', (req, res) => {
+route('/api/login', async (req, res) => {
   const phone = String(req.body.phone || '').trim();
-  if (!users[phone]) return res.json({ success: false, msg: "No account. Please CREATE ACCOUNT first" });
-  const u = authUser(res, phone, req.body.pin);
+  const ex = await q('SELECT 1 FROM users WHERE phone=$1', [phone]);
+  if (!ex.rows[0]) return res.json({ success: false, msg: "No account. Please CREATE ACCOUNT first" });
+  let u = await authUser(res, phone, req.body.pin);
   if (!u) return;
-  giveBonus(u);
-  res.json({ success: true, msg: "Welcome " + u.name, user: safe(u), token: newSession(phone) });
+  if (HOST_PHONE && phone === HOST_PHONE) {
+    const b = await q('UPDATE users SET coins=coins+$1, bonus_given=true WHERE phone=$2 AND bonus_given=false RETURNING *', [BONUS_MES, phone]);
+    if (b.rows[0]) u = b.rows[0];
+  }
+  res.json({ success: true, msg: "Welcome " + u.name, user: safe(u), token: await newSession(phone) });
 });
 
-app.post('/api/send', (req, res) => {
+route('/api/send', async (req, res) => {
   const toPhone = String(req.body.toPhone || '').trim();
-  const coins = Number(req.body.coins);
-  if (!(coins > 0) || !isFinite(coins)) return res.json({ success: false, msg: "Invalid amount" });
-  const from = pinUser(req, res);
+  const coins = round(Number(req.body.coins));
+  if (!(coins > 0) || !isFinite(coins) || coins > 1e12) return res.json({ success: false, msg: "Invalid amount" });
+  const from = await pinUser(req, res);
   if (!from) return;
   if (from.phone === toPhone) return res.json({ success: false, msg: "You can't send to yourself" });
-  if (!users[toPhone]) return res.json({ success: false, msg: "❌ " + toPhone + " has NO account. Tell them to create account." });
-  if (from.coins < coins) return res.json({ success: false, msg: "Not enough MES" });
-  from.coins = round(from.coins - coins);
-  users[toPhone].coins = round(users[toPhone].coins + coins);
-  res.json({ success: true, msg: "Sent " + coins + " MES to " + users[toPhone].name, user: safe(from) });
+  const out = await tx(async c => {
+    const m = await lockUsers(c, [from.phone, toPhone]);
+    const to = m[toPhone], f = m[from.phone];
+    if (!to) return { success: false, msg: "❌ " + toPhone + " has NO account. Tell them to create account." };
+    if (n(f.coins) < coins) return { success: false, msg: "Not enough MES" };
+    const r = await c.query('UPDATE users SET coins=coins-$1 WHERE phone=$2 RETURNING *', [coins, from.phone]);
+    await c.query('UPDATE users SET coins=coins+$1 WHERE phone=$2', [coins, toPhone]);
+    return { success: true, msg: "Sent " + coins + " MES to " + to.name, user: safe(r.rows[0]) };
+  });
+  res.json(out);
 });
 
 // ---------- market ----------
-app.post('/api/market/post', (req, res) => {
+route('/api/market/post', async (req, res) => {
   const { type } = req.body;
   const mes = round(Number(req.body.mes)), price = round(Number(req.body.price));
   if (!['buy', 'sell'].includes(type)) return res.json({ success: false, msg: "Invalid order type" });
   if (!(mes > 0) || !(price > 0) || mes > 1e9 || price > 1e6) return res.json({ success: false, msg: "Enter a valid amount and price" });
   const ksh = round(mes * price);
   if (!(ksh > 0)) return res.json({ success: false, msg: "Order too small" });
-  const u = pinUser(req, res);
+  const u = await pinUser(req, res);
   if (!u) return;
-  if (type === 'sell') {
-    if (u.coins < mes) return res.json({ success: false, msg: "Not enough MES" });
-    u.coins = round(u.coins - mes);
-  }
-  const id = crypto.randomBytes(8).toString('hex');
-  orders[id] = { id, owner: u.phone, type, mes, price, ksh, status: 'open', created: Date.now() };
-  res.json({
-    success: true,
-    msg: type === 'sell'
-      ? "Order posted. Your " + mes + " MES is locked until someone accepts or you cancel."
-      : "Buy order posted. When a seller accepts, a chat will open and you pay them by M-Pesa.",
-    user: safe(u)
+  const out = await tx(async c => {
+    const m = await lockUsers(c, [u.phone]);
+    let cur = m[u.phone];
+    if (type === 'sell') {
+      if (n(cur.coins) < mes) return { success: false, msg: "Not enough MES" };
+      cur = (await c.query('UPDATE users SET coins=coins-$1 WHERE phone=$2 RETURNING *', [mes, u.phone])).rows[0];
+    }
+    await c.query('INSERT INTO orders(id,owner_phone,type,mes,price,ksh,status,created) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [crypto.randomBytes(8).toString('hex'), u.phone, type, mes, price, ksh, 'open', Date.now()]);
+    return {
+      success: true,
+      msg: type === 'sell'
+        ? "Order posted. Your " + mes + " MES is locked until someone accepts or you cancel."
+        : "Buy order posted. When a seller accepts, a chat will open and you pay them by M-Pesa.",
+      user: safe(cur)
+    };
   });
+  res.json(out);
 });
 
-app.post('/api/market/list', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/market/list', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
   const type = req.body.type;
   if (!['buy', 'sell'].includes(type)) return res.json({ orders: [] });
-  const list = Object.values(orders)
-    .filter(o => o.status === 'open' && o.type === type && o.owner !== u.phone)
-    .sort((a, b) => b.created - a.created).slice(0, 50)
-    .map(o => ({ id: o.id, ownerName: users[o.owner].name, ownerPhone: mask(o.owner), type: o.type, mes: o.mes, price: o.price, ksh: o.ksh }));
-  res.json({ orders: list });
+  const r = await q(`SELECT o.*, w.name AS owner_name FROM orders o JOIN users w ON w.phone=o.owner_phone
+    WHERE o.status='open' AND o.type=$1 AND o.owner_phone<>$2 ORDER BY o.created DESC LIMIT 50`, [type, u.phone]);
+  res.json({ orders: r.rows.map(o => ({ id: o.id, ownerName: o.owner_name, ownerPhone: mask(o.owner_phone), type: o.type, mes: n(o.mes), price: n(o.price), ksh: n(o.ksh) })) });
 });
 
-app.post('/api/market/accept', (req, res) => {
-  const o = orders[req.body.orderId];
-  if (!o || o.status !== 'open') return res.json({ success: false, refresh: true, msg: "Order no longer available" });
-  const taker = pinUser(req, res);
+route('/api/market/accept', async (req, res) => {
+  const taker = await pinUser(req, res);
   if (!taker) return;
-  if (o.status !== 'open') return res.json({ success: false, refresh: true, msg: "Order no longer available" });
-  if (o.owner === taker.phone) return res.json({ success: false, msg: "You can't accept your own order" });
-  const owner = users[o.owner];
-  let seller, buyer;
-  if (o.type === 'sell') {
-    seller = owner; buyer = taker;               // seller's MES already locked in the order
-  } else {
-    seller = taker; buyer = owner;
-    if (taker.coins < o.mes) return res.json({ success: false, msg: "Not enough MES" });
-    taker.coins = round(taker.coins - o.mes);    // lock seller's MES now
-  }
-  o.status = 'in_trade';
-  const id = crypto.randomBytes(8).toString('hex');
-  const t = { id, orderId: o.id, seller: seller.phone, buyer: buyer.phone, mes: o.mes, price: o.price, ksh: o.ksh, status: 'active', messages: [], created: Date.now() };
-  trades[id] = t;
-  addMsg(t, 'system', "Trade started. " + o.mes + " MES is locked in escrow. Buyer: pay KSh " + o.ksh + " to the seller by M-Pesa, then tap I HAVE PAID. Seller: release only after you receive the money.");
-  res.json({ success: true, msg: "Trade started", tradeId: id, user: safe(taker) });
+  const out = await tx(async c => {
+    const orr = await c.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [String(req.body.orderId || '')]);
+    const o = orr.rows[0];
+    if (!o || o.status !== 'open') return { success: false, refresh: true, msg: "Order no longer available" };
+    if (o.owner_phone === taker.phone) return { success: false, msg: "You can't accept your own order" };
+    const m = await lockUsers(c, [o.owner_phone, taker.phone]);
+    let seller, buyer, takerRow = m[taker.phone];
+    if (o.type === 'sell') {
+      seller = o.owner_phone; buyer = taker.phone;           // MES already locked in the order
+    } else {
+      seller = taker.phone; buyer = o.owner_phone;
+      if (n(takerRow.coins) < n(o.mes)) return { success: false, msg: "Not enough MES" };
+      takerRow = (await c.query('UPDATE users SET coins=coins-$1 WHERE phone=$2 RETURNING *', [o.mes, taker.phone])).rows[0];
+    }
+    await c.query("UPDATE orders SET status='in_trade' WHERE id=$1", [o.id]);
+    const id = crypto.randomBytes(8).toString('hex');
+    await c.query(`INSERT INTO trades(id,order_id,seller,buyer,mes,price,ksh,status,created) VALUES($1,$2,$3,$4,$5,$6,$7,'active',$8)`,
+      [id, o.id, seller, buyer, o.mes, o.price, o.ksh, Date.now()]);
+    await addMsg(c, id, 'system', "Trade started. " + n(o.mes) + " MES is locked in escrow. Buyer: pay KSh " + n(o.ksh) + " to the seller by M-Pesa, then tap I HAVE PAID. Seller: release only after you receive the money.");
+    return { success: true, msg: "Trade started", tradeId: id, user: safe(takerRow) };
+  });
+  res.json(out);
 });
 
-app.post('/api/market/mine', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/market/mine', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
-  const list = Object.values(orders)
-    .filter(o => o.status === 'open' && o.owner === u.phone)
-    .sort((a, b) => b.created - a.created)
-    .map(o => ({ id: o.id, type: o.type, mes: o.mes, price: o.price, ksh: o.ksh }));
-  res.json({ orders: list });
+  const r = await q("SELECT * FROM orders WHERE status='open' AND owner_phone=$1 ORDER BY created DESC", [u.phone]);
+  res.json({ orders: r.rows.map(o => ({ id: o.id, type: o.type, mes: n(o.mes), price: n(o.price), ksh: n(o.ksh) })) });
 });
 
-app.post('/api/market/cancel', (req, res) => {
-  const o = orders[req.body.orderId];
-  const u = pinUser(req, res);
+route('/api/market/cancel', async (req, res) => {
+  const u = await pinUser(req, res);
   if (!u) return;
-  if (!o || o.status !== 'open' || o.owner !== u.phone) return res.json({ success: false, refresh: true, msg: "Order not found" });
-  if (o.type === 'sell') u.coins = round(u.coins + o.mes);
-  o.status = 'cancelled';
-  res.json({ success: true, msg: "Order cancelled." + (o.type === 'sell' ? " MES returned." : ""), user: safe(u) });
+  const out = await tx(async c => {
+    const orr = await c.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [String(req.body.orderId || '')]);
+    const o = orr.rows[0];
+    if (!o || o.status !== 'open' || o.owner_phone !== u.phone) return { success: false, refresh: true, msg: "Order not found" };
+    await lockUsers(c, [u.phone]);
+    let cur = (await c.query('SELECT * FROM users WHERE phone=$1', [u.phone])).rows[0];
+    if (o.type === 'sell') cur = (await c.query('UPDATE users SET coins=coins+$1 WHERE phone=$2 RETURNING *', [o.mes, u.phone])).rows[0];
+    await c.query("UPDATE orders SET status='cancelled' WHERE id=$1", [o.id]);
+    return { success: true, msg: "Order cancelled." + (o.type === 'sell' ? " MES returned." : ""), user: safe(cur) };
+  });
+  res.json(out);
 });
 
 // ---------- trades ----------
-app.post('/api/trade/mine', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/trade/mine', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
-  const mine = Object.values(trades)
-    .filter(t => isParty(t, u))
-    .sort((a, b) => b.created - a.created).slice(0, 30)
-    .map(t => tradeSummary(t, u));
-  const disputes = isHost(u)
-    ? Object.values(trades).filter(t => t.status === 'disputed').sort((a, b) => b.created - a.created).map(t => tradeSummary(t, u))
-    : [];
-  res.json({ trades: mine, disputes });
+  const base = `SELECT t.*, s.name AS seller_name, b.name AS buyer_name FROM trades t
+    JOIN users s ON s.phone=t.seller JOIN users b ON b.phone=t.buyer`;
+  const mine = await q(base + ' WHERE t.seller=$1 OR t.buyer=$1 ORDER BY t.created DESC LIMIT 30', [u.phone]);
+  let disputes = [];
+  if (isHost(u)) {
+    const d = await q(base + " WHERE t.status='disputed' ORDER BY t.created DESC");
+    disputes = d.rows.map(t => tradeSummary(t, u));
+  }
+  res.json({ trades: mine.rows.map(t => tradeSummary(t, u)), disputes });
 });
 
-app.post('/api/trade/get', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/trade/get', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
-  const t = trades[req.body.tradeId];
+  const t = await loadTrade(req.body.tradeId);
   if (!t || !canSee(t, u)) return res.json({ success: false, msg: "Trade not found" });
-  res.json({ success: true, trade: tradeView(t, u) });
+  const ms = await q('SELECT * FROM messages WHERE trade_id=$1 ORDER BY id DESC LIMIT 300', [t.id]);
+  const msgs = ms.rows.reverse();
+  res.json({
+    success: true,
+    trade: {
+      id: t.id, status: t.status, mes: n(t.mes), price: n(t.price), ksh: n(t.ksh),
+      open: OPEN.includes(t.status), role: roleOf(t, u),
+      seller: { name: t.seller_name, phone: t.seller },
+      buyer: { name: t.buyer_name, phone: t.buyer },
+      report: t.report_reason ? { by: t.report_by === t.seller ? t.seller_name : t.buyer_name, reason: t.report_reason } : null,
+      messages: msgs.map(m => ({ mine: m.sender === u.phone, system: m.sender === 'system', name: m.name, text: m.body }))
+    }
+  });
 });
 
-app.post('/api/trade/chat', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/trade/chat', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
-  const t = trades[req.body.tradeId];
+  const t = await loadTrade(req.body.tradeId);
   if (!t || !canSee(t, u)) return res.json({ success: false, msg: "Trade not found" });
   if (!OPEN.includes(t.status)) return res.json({ success: false, msg: "Trade is closed" });
   const text = String(req.body.text || '').trim().slice(0, 300);
   if (!text) return res.json({ success: false, msg: "Empty message" });
-  addMsg(t, u.phone, text);
+  const cnt = await q('SELECT COUNT(*) FROM messages WHERE trade_id=$1', [t.id]);
+  if (n(cnt.rows[0].count) > 500) return res.json({ success: false, msg: "Chat limit reached" });
+  await tx(c => addMsg(c, t.id, u.phone, text));
   res.json({ success: true });
 });
 
-app.post('/api/trade/paid', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/trade/paid', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
-  const t = trades[req.body.tradeId];
-  if (!t || u.phone !== t.buyer) return res.json({ success: false, msg: "Only the buyer can do this" });
-  if (t.status !== 'active') return res.json({ success: false, msg: "Not available now" });
-  t.status = 'paid';
-  addMsg(t, 'system', users[t.buyer].name + " says they paid KSh " + t.ksh + ". Seller: check your M-Pesa, then release the MES with your PIN.");
-  res.json({ success: true, msg: "Marked as paid. Wait for the seller to release." });
+  const out = await tx(async c => {
+    const tr = await c.query('SELECT * FROM trades WHERE id=$1 FOR UPDATE', [String(req.body.tradeId || '')]);
+    const t = tr.rows[0];
+    if (!t || u.phone !== t.buyer) return { success: false, msg: "Only the buyer can do this" };
+    if (t.status !== 'active') return { success: false, msg: "Not available now" };
+    await c.query("UPDATE trades SET status='paid' WHERE id=$1", [t.id]);
+    await addMsg(c, t.id, 'system', u.name + " says they paid KSh " + n(t.ksh) + ". Seller: check your M-Pesa, then release the MES with your PIN.");
+    return { success: true, msg: "Marked as paid. Wait for the seller to release." };
+  });
+  res.json(out);
 });
 
-app.post('/api/trade/release', (req, res) => {
-  const t = trades[req.body.tradeId];
-  if (!t) return res.json({ success: false, msg: "Trade not found" });
-  const u = pinUser(req, res);
+route('/api/trade/release', async (req, res) => {
+  const u = await pinUser(req, res);
   if (!u) return;
-  if (u.phone !== t.seller) return res.json({ success: false, msg: "Only the seller can release MES" });
-  if (!['active', 'paid'].includes(t.status)) return res.json({ success: false, msg: "Trade is not open" });
-  const buyer = users[t.buyer];
-  buyer.coins = round(buyer.coins + t.mes);
-  t.status = 'completed';
-  orders[t.orderId].status = 'done';
-  addMsg(t, 'system', "✅ Seller released " + t.mes + " MES to the buyer. Trade complete.");
-  res.json({ success: true, msg: "Released " + t.mes + " MES to " + buyer.name, user: safe(u) });
+  const out = await tx(async c => {
+    const tr = await c.query('SELECT * FROM trades WHERE id=$1 FOR UPDATE', [String(req.body.tradeId || '')]);
+    const t = tr.rows[0];
+    if (!t) return { success: false, msg: "Trade not found" };
+    if (u.phone !== t.seller) return { success: false, msg: "Only the seller can release MES" };
+    if (!['active', 'paid'].includes(t.status)) return { success: false, msg: "Trade is not open" };
+    const b = await c.query('UPDATE users SET coins=coins+$1 WHERE phone=$2 RETURNING name', [t.mes, t.buyer]);
+    await c.query("UPDATE trades SET status='completed' WHERE id=$1", [t.id]);
+    await c.query("UPDATE orders SET status='done' WHERE id=$1", [t.order_id]);
+    await addMsg(c, t.id, 'system', "✅ Seller released " + n(t.mes) + " MES to the buyer. Trade complete.");
+    const me = (await c.query('SELECT * FROM users WHERE phone=$1', [u.phone])).rows[0];
+    return { success: true, msg: "Released " + n(t.mes) + " MES to " + b.rows[0].name, user: safe(me) };
+  });
+  res.json(out);
 });
 
-app.post('/api/trade/cancel', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/trade/cancel', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
-  const t = trades[req.body.tradeId];
-  if (!t || u.phone !== t.buyer) return res.json({ success: false, msg: "Only the buyer can cancel" });
-  if (t.status !== 'active') return res.json({ success: false, msg: "Can't cancel now. Use REPORT if there is a problem." });
-  const seller = users[t.seller];
-  seller.coins = round(seller.coins + t.mes);
-  t.status = 'cancelled';
-  orders[t.orderId].status = 'cancelled';
-  addMsg(t, 'system', "Buyer cancelled the trade. MES returned to the seller.");
-  res.json({ success: true, msg: "Trade cancelled" });
+  const out = await tx(async c => {
+    const tr = await c.query('SELECT * FROM trades WHERE id=$1 FOR UPDATE', [String(req.body.tradeId || '')]);
+    const t = tr.rows[0];
+    if (!t || u.phone !== t.buyer) return { success: false, msg: "Only the buyer can cancel" };
+    if (t.status !== 'active') return { success: false, msg: "Can't cancel now. Use REPORT if there is a problem." };
+    await c.query('UPDATE users SET coins=coins+$1 WHERE phone=$2', [t.mes, t.seller]);
+    await c.query("UPDATE trades SET status='cancelled' WHERE id=$1", [t.id]);
+    await c.query("UPDATE orders SET status='cancelled' WHERE id=$1", [t.order_id]);
+    await addMsg(c, t.id, 'system', "Buyer cancelled the trade. MES returned to the seller.");
+    return { success: true, msg: "Trade cancelled" };
+  });
+  res.json(out);
 });
 
-app.post('/api/trade/report', (req, res) => {
-  const u = sessionUser(req, res);
+route('/api/trade/report', async (req, res) => {
+  const u = await sessionUser(req, res);
   if (!u) return;
-  const t = trades[req.body.tradeId];
-  if (!t || !isParty(t, u)) return res.json({ success: false, msg: "Trade not found" });
-  if (!['active', 'paid'].includes(t.status)) return res.json({ success: false, msg: "Can't report this trade now" });
   const reason = String(req.body.reason || '').trim().slice(0, 300);
-  if (reason.length < 3) return res.json({ success: false, msg: "Please explain what happened" });
-  t.status = 'disputed';
-  t.report = { by: u.phone, reason, time: Date.now() };
-  addMsg(t, 'system', "🚨 " + u.name + " reported a problem: \"" + reason + "\". The host (" + HOST_PHONE + ") will review this chat and decide. MES stays locked until then.");
-  res.json({ success: true, msg: "Reported to the host. They will review and help." });
+  const out = await tx(async c => {
+    const tr = await c.query('SELECT * FROM trades WHERE id=$1 FOR UPDATE', [String(req.body.tradeId || '')]);
+    const t = tr.rows[0];
+    if (!t || !isParty(t, u)) return { success: false, msg: "Trade not found" };
+    if (!['active', 'paid'].includes(t.status)) return { success: false, msg: "Can't report this trade now" };
+    if (reason.length < 3) return { success: false, msg: "Please explain what happened" };
+    await c.query("UPDATE trades SET status='disputed', report_by=$1, report_reason=$2 WHERE id=$3", [u.phone, reason, t.id]);
+    await addMsg(c, t.id, 'system', "🚨 " + u.name + " reported a problem: \"" + reason + "\". The host will review this chat and decide. MES stays locked until then.");
+    return { success: true, msg: "Reported to the host. They will review and help." };
+  });
+  res.json(out);
 });
 
-app.post('/api/trade/resolve', (req, res) => {
-  const t = trades[req.body.tradeId];
-  if (!t) return res.json({ success: false, msg: "Trade not found" });
-  const u = pinUser(req, res);
+route('/api/trade/resolve', async (req, res) => {
+  const u = await pinUser(req, res);
   if (!u) return;
   if (!isHost(u)) return res.json({ success: false, msg: "Only the host can resolve disputes" });
-  if (isParty(t, u)) return res.json({ success: false, msg: "You are part of this trade, so you can't resolve it" });
-  if (t.status !== 'disputed') return res.json({ success: false, msg: "Not a reported trade" });
-  if (req.body.action === 'release') {
-    users[t.buyer].coins = round(users[t.buyer].coins + t.mes);
-    t.status = 'resolved_release';
-    addMsg(t, 'system', "✅ Host released " + t.mes + " MES to the buyer.");
-  } else if (req.body.action === 'refund') {
-    users[t.seller].coins = round(users[t.seller].coins + t.mes);
-    t.status = 'resolved_refund';
-    addMsg(t, 'system', "↩️ Host refunded " + t.mes + " MES to the seller.");
-  } else {
-    return res.json({ success: false, msg: "Invalid action" });
-  }
-  orders[t.orderId].status = 'done';
-  res.json({ success: true, msg: "Dispute resolved", user: safe(u) });
+  const action = req.body.action;
+  if (!['release', 'refund'].includes(action)) return res.json({ success: false, msg: "Invalid action" });
+  const out = await tx(async c => {
+    const tr = await c.query('SELECT * FROM trades WHERE id=$1 FOR UPDATE', [String(req.body.tradeId || '')]);
+    const t = tr.rows[0];
+    if (!t) return { success: false, msg: "Trade not found" };
+    if (isParty(t, u)) return { success: false, msg: "You are part of this trade, so you can't resolve it" };
+    if (t.status !== 'disputed') return { success: false, msg: "Not a reported trade" };
+    if (action === 'release') {
+      await c.query('UPDATE users SET coins=coins+$1 WHERE phone=$2', [t.mes, t.buyer]);
+      await c.query("UPDATE trades SET status='resolved_release' WHERE id=$1", [t.id]);
+      await addMsg(c, t.id, 'system', "✅ Host released " + n(t.mes) + " MES to the buyer.");
+    } else {
+      await c.query('UPDATE users SET coins=coins+$1 WHERE phone=$2', [t.mes, t.seller]);
+      await c.query("UPDATE trades SET status='resolved_refund' WHERE id=$1", [t.id]);
+      await addMsg(c, t.id, 'system', "↩️ Host refunded " + n(t.mes) + " MES to the seller.");
+    }
+    await c.query("UPDATE orders SET status='done' WHERE id=$1", [t.order_id]);
+    return { success: true, msg: "Dispute resolved", user: safe(u) };
+  });
+  res.json(out);
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("Running on " + PORT));
+initDb()
+  .then(() => app.listen(PORT, () => console.log("Running on " + PORT)))
+  .catch(e => { console.error('DB init failed', e); process.exit(1); });
+  
