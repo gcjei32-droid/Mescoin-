@@ -11,9 +11,14 @@ if (!HOST_PHONE) console.warn('HOST_PHONE is not set: there will be no host acco
 if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is missing'); process.exit(1); }
 
 const dbUrl = process.env.DATABASE_URL;
+let dbHost = '';
+try { dbHost = new URL(dbUrl).hostname; } catch (e) { console.error('DATABASE_URL is not a valid URL'); process.exit(1); }
+console.log('Connecting to DB host:', dbHost);
 const pool = new Pool({
   connectionString: dbUrl,
-  ssl: /\.render\.com/.test(dbUrl) ? { rejectUnauthorized: false } : false
+  connectionTimeoutMillis: 10000,
+  // Render's internal host has no dots, so it needs no SSL. Any other host does.
+  ssl: dbHost.includes('.') ? { rejectUnauthorized: false } : false
 });
 pool.on('error', e => console.error('pool error', e.message));
 
@@ -332,7 +337,6 @@ async function openHost(){
     box.appendChild(c);
   });
 }
-
 async function openTrade(id){
   curTrade=id;lastCount=-1;lastKey="";
   go('trade');
@@ -703,4 +707,4 @@ const PORT = process.env.PORT || 10000;
 initDb()
   .then(() => app.listen(PORT, () => console.log("Running on " + PORT)))
   .catch(e => { console.error('DB init failed', e); process.exit(1); });
-  
+                                                  
